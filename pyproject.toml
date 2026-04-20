@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "focl"
+version = "0.1.0"
+description = "AI-native codebase compression — generate and maintain .focl files"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Fulvio Ieva", email = "fulvio.ieva@twinaxis.com" },
+]
+keywords = ["ai", "llm", "codebase", "compression", "claude", "anthropic", "context-engineering"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "anthropic>=0.40.0",
+    "click>=8.1",
+    "watchdog>=4.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/focl-lang/focl"
+Repository = "https://github.com/focl-lang/focl"
+Issues = "https://github.com/focl-lang/focl/issues"
+
+[project.scripts]
+focl = "focl.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["focl*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
