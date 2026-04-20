@@ -78,7 +78,11 @@ class TestMeasureFromPaths:
     ) -> None:
         info = detect(tmp_java_project)
         focl_file = tmp_path / "out.focl"
-        focl_file.write_text("SERVICE UserService\n  ACTION get -> UserDTO\n")
+        content = "SERVICE UserService\n  ACTION get -> UserDTO\n"
+        focl_file.write_text(content, encoding="utf-8")
         m = measure_from_paths(info, focl_file, exact=False)
         assert m.focl_tokens > 0
-        assert m.focl_bytes == focl_file.stat().st_size
+        # Compare against the in-memory byte length, not stat().st_size:
+        # on Windows, write_text uses CRLF line endings which inflates
+        # st_size by 1 byte per newline vs len(content.encode("utf-8")).
+        assert m.focl_bytes == len(content.encode("utf-8"))
