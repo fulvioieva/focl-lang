@@ -18,6 +18,13 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Planned
+- Externalise system prompts to `focl/prompts/` as loadable resources
+
+---
+
+## [0.4.1] — 2026-06-29
+
 ### Added
 - **`focl validate`** — offline structural check of a `.focl` file (no API).
   Errors on definite defects (empty file, markdown code fences, a `# src:`
@@ -27,10 +34,8 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 - CLI output is now cp1252-safe (replaced `→`/`✗`/`⚠` with ASCII), avoiding a
-  `UnicodeEncodeError` crash from `rich` on the legacy Windows console.
-
-### Planned
-- Externalise system prompts to `focl/prompts/` as loadable resources
+  `UnicodeEncodeError` crash from `rich` on the legacy Windows console
+  (also affected `init`, `claude-setup`, and `decompile`).
 
 ---
 
