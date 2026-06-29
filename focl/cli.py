@@ -15,6 +15,7 @@ from rich.table import Table
 
 from . import __version__
 from .analyzer import detect
+from .decompiler import decompile as decompile_focl
 from .generator import generate, update
 from .mcp_server import serve as mcp_serve
 from .metrics import measure, measure_from_paths
@@ -494,6 +495,80 @@ def check(path: str, focl_file: str | None) -> None:
         )
     else:
         console.print(f"[green]FOCL map is up to date[/green] ({out.name}).")
+
+
+@main.command()
+@click.argument("path", default=".", required=False)
+@click.option("--focl-file", "-f", default=None, help="Path to the .focl file to decompile")
+@click.option("--output", "-o", default=None,
+              help="Output directory (default: ./<project>-decompiled)")
+@click.option("--lang", default=None,
+              help="Target language (default: inferred from the .focl header)")
+@_llm_options
+@click.option("--force", is_flag=True, help="Write into a non-empty output directory")
+def decompile(path: str, focl_file: str | None, output: str | None, lang: str | None,
+              provider: str, model: str | None, api_key: str | None,
+              base_url: str | None, force: bool) -> None:
+    """Reconstruct source code from a .focl file (round-trip)."""
+    root = _resolve_root(path)
+    src = Path(focl_file).resolve() if focl_file else _focl_path(root, None)
+    if not src.exists():
+        console.print(f"[red]Error:[/red] {src.name} not found. Run 'focl init' first.")
+        sys.exit(1)
+
+    out_dir = Path(output).resolve() if output else (root / f"{root.name}-decompiled")
+    if out_dir.exists() and any(out_dir.iterdir()) and not force:
+        console.print(
+            f"[yellow]{out_dir}[/yellow] is not empty. Use --force to write into it."
+        )
+        sys.exit(0)
+
+    config = _build_config(provider, model, api_key, base_url)
+    content = src.read_text(encoding="utf-8")
+
+    console.print(f"[bold]FOCL[/bold] decompiling [cyan]{src.name}[/cyan]")
+    console.print(f"  Model:  [green]{config.provider}[/green] / {config.model}")
+
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+                  console=console) as progress:
+        task = progress.add_task("Starting...", total=None)
+        try:
+            files = decompile_focl(
+                content, config, lang=lang,
+                progress=lambda m: progress.update(task, description=m),
+            )
+        except Exception as e:
+            progress.update(task, description="[red]Decompile failed[/red]")
+            console.print(f"\n[red]Error:[/red] {e}")
+            sys.exit(1)
+        progress.update(task, description="[green]Done[/green]", completed=True)
+
+    written = 0
+    total_bytes = 0
+    for rel, code in files.items():
+        target = _safe_join(out_dir, rel)
+        if target is None:
+            console.print(f"  [yellow]Skipped[/yellow] unsafe path: {rel}")
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(code, encoding="utf-8")
+        written += 1
+        total_bytes += len(code.encode("utf-8"))
+
+    console.print(
+        f"\n[bold green]Done[/bold green] — {written} file(s), "
+        f"{total_bytes / 1024:.0f} KB → {out_dir}"
+    )
+
+
+def _safe_join(base: Path, rel: str) -> Path | None:
+    """Join ``rel`` under ``base``, rejecting paths that escape ``base``."""
+    target = (base / rel).resolve()
+    try:
+        target.relative_to(base.resolve())
+    except ValueError:
+        return None
+    return target
 
 
 @main.command(name="claude-setup")

@@ -126,6 +126,17 @@ Show compression statistics.
 focl stats .
 ```
 
+### `focl decompile [path]`
+Reconstruct source code from the `.focl` file — the round-trip / lossless proof.
+
+```bash
+focl decompile .                       # → ./<project>-decompiled/
+focl decompile . --lang java --output ./reconstructed --force
+```
+
+Decompiles each module back into its original path (using the `# src:` index)
+and infers the target language from the `.focl` header.
+
 ## Claude Code integration
 
 FOCL plugs into [Claude Code](https://claude.com/claude-code) on four levels.
@@ -212,9 +223,10 @@ Measured by comparing `tiktoken` counts of original source files vs. the generat
 - [x] Core grammar and primitives
 - [x] `focl init` — full codebase analysis
 - [x] `focl watch` — incremental patching
-- [ ] `focl decompile` — reconstruct source from `.focl` (round-trip)
+- [x] `focl decompile` — reconstruct source from `.focl` (round-trip)
+- [x] Claude Code integration — `CLAUDE.md` pointer, MCP server, freshness hook, skill
+- [x] Multi-model support (GPT, Gemini, Llama, … via OpenRouter)
 - [ ] IDE extension (VS Code) — side-by-side `.focl` view
-- [ ] Multi-model support (GPT, Gemini, Llama)
 - [ ] Plugin system for domain-specific primitive packs
 - [ ] Benchmark suite for cross-language compression metrics
 

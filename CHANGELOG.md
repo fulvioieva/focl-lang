@@ -28,14 +28,20 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   blocks to target. Cheaper, faster, and no drift on untouched blocks.
 
 ### Added
+- **`focl decompile`** — reconstruct source code from a `.focl` file (the
+  round-trip / lossless proof). Decompiles per-module using the `# src:` index
+  (each block back into its original path), falling back to a whole-project
+  reconstruction split on `=== path ===` headers when the file has no
+  annotations. Infers the target language from the `.focl` header (`--lang`
+  to override); writes to `./<project>-decompiled` (`--output`/`--force`).
+  New module `focl/decompiler.py`.
 - `index.split_segments()` and `index.splice_blocks()` — the pure, tested
   splice primitives behind the surgical update.
-- `tests/test_generator.py` — covers `update()` orchestration (replace / delete
-  / append / fallback) with the LLM call stubbed.
+- `tests/test_generator.py` and `tests/test_decompiler.py` — cover the
+  `update()` and `decompile()` orchestration with the LLM call stubbed.
 
 ### Planned
 - `focl validate` — verify `.focl` file structure and primitive usage
-- `focl decompile` — reconstruct source from `.focl` (round-trip proof)
 - Externalise system prompts to `focl/prompts/` as loadable resources
 - Distributable Claude Code plugin (bundle MCP + skill + hook + commands)
 

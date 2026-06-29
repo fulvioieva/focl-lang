@@ -29,6 +29,7 @@ focl plan [path]      # preview the sharding plan WITHOUT calling the API (offli
 focl check [path]     # offline: is the .focl stale vs the sources? (no API)
 focl mcp [path]       # run the MCP server exposing the .focl (needs [mcp] extra)
 focl claude-setup     # scaffold Claude Code integration (CLAUDE.md, .mcp.json, hook, skill)
+focl decompile [path] # reconstruct source from the .focl (round-trip; calls the LLM)
 ```
 
 Any command that compresses requires an API key — `ANTHROPIC_API_KEY` (default provider) or `OPENROUTER_API_KEY` (with `--provider openrouter`), or `--api-key`. `init`/`sync`/`watch`/`stats` accept `--provider {anthropic,openrouter}`, `--model`, `--base-url`. `init`/`sync` also take `--claude` (write just the `CLAUDE.md` pointer). `focl plan`, `focl check`, `focl claude-setup`, and the test suite run fully offline.
@@ -55,6 +56,7 @@ The pipeline flows in one direction across small single-purpose modules in `focl
 
 - **`index.py`** — parses a generated `.focl` back into `{source_path: block}` by its `# src:` annotations (`parse_focl_blocks`, `module_paths`, `get_module`, `overview`, `header`) and provides the splice primitives (`split_segments`, `splice_blocks`) used by surgical `update()`. Pure/offline; the keystone for the MCP server and surgical patching.
 - **`mcp_server.py`** — `focl mcp` runtime. A thin FastMCP wrapper over `index` exposing tools (`focl_overview`, `focl_list_modules`, `focl_module`) and the `focl://project` resource; re-reads the `.focl` on every call so edits show up live. `mcp` is an optional dep (`[mcp]` extra), imported lazily.
+- **`decompiler.py`** — the reverse direction (`focl decompile`). Per-module reconstruction keyed by the `# src:` index (`_decompile_block`), with a whole-project fallback (`_decompile_whole` → `_split_files` on `=== path ===` headers) when there are no annotations. Its own `_SYSTEM_PROMPT`; model call via `providers.generate_text`. The CLI command writes files under a `_safe_join` guard (rejects paths escaping the output dir).
 
 ### Key cross-module conventions
 
@@ -65,7 +67,7 @@ The pipeline flows in one direction across small single-purpose modules in `focl
 
 ## Testing notes
 
-Tests run fully offline. Most cover the offline machinery directly (analyzer, sharder, metrics estimates, watcher, index/splice, the CLI scaffolding + `plan`/`check`); `test_generator.py` covers `update()` orchestration by **stubbing** `generator.generate_text`, so no real network call is made. The single-shot/sharded `generate()` path against a live provider is still not exercised. `test_mcp_server.py` is skipped unless the optional `[mcp]` extra is installed. Fixtures in `tests/conftest.py` build minimal throwaway projects (Spring Boot, Python, ignored-files, oversize-file) under `tmp_path`. CI runs the suite on Python 3.10–3.12 across Linux/macOS/Windows.
+Tests run fully offline. Most cover the offline machinery directly (analyzer, sharder, metrics estimates, watcher, index/splice, the CLI scaffolding + `plan`/`check`); `test_generator.py` and `test_decompiler.py` cover the `update()` and `decompile()` orchestration by **stubbing** `generate_text`, so no real network call is made. The single-shot/sharded `generate()` path against a live provider is still not exercised. `test_mcp_server.py` is skipped unless the optional `[mcp]` extra is installed. Fixtures in `tests/conftest.py` build minimal throwaway projects (Spring Boot, Python, ignored-files, oversize-file) under `tmp_path`. CI runs the suite on Python 3.10–3.12 across Linux/macOS/Windows.
 
 ## Versioning
 
