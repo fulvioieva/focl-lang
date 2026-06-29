@@ -62,6 +62,58 @@ class TestParsing:
         assert "focl_module(" in ov
 
 
+class TestSegments:
+    def test_split_round_trips(self) -> None:
+        segments = index.split_segments(_SAMPLE)
+        assert "".join(text for _, text in segments) == _SAMPLE
+
+    def test_first_segment_is_preamble(self) -> None:
+        segments = index.split_segments(_SAMPLE)
+        assert segments[0][0] is None
+        assert "project: demo" in segments[0][1]
+
+    def test_segment_paths(self) -> None:
+        paths = [p for p, _ in index.split_segments(_SAMPLE) if p is not None]
+        assert paths == [
+            "services/UserService.java",
+            "controllers/UserController.java",
+        ]
+
+
+class TestSpliceBlocks:
+    def test_no_op_returns_identical(self) -> None:
+        assert index.splice_blocks(_SAMPLE, {}, []) == _SAMPLE
+
+    def test_replace_in_place_keeps_others(self) -> None:
+        new = "# src: services/UserService.java\nSERVICE UserService\n  ACTION get2 -> X"
+        out = index.splice_blocks(_SAMPLE, {"services/UserService.java": new})
+        assert "get2 -> X" in out
+        assert "get(id) -> UserDTO" not in out
+        # The other block and the preamble survive untouched.
+        assert "CTRL UserController" in out
+        assert "project: demo" in out
+
+    def test_replace_matches_across_slash_styles(self) -> None:
+        # Windows-style changed path still hits a forward-slash `# src:` block.
+        new = "# src: services/UserService.java\nSERVICE UserService\n  X"
+        out = index.splice_blocks(_SAMPLE, {"services\\UserService.java": new})
+        assert "  X" in out
+        assert "get(id) -> UserDTO" not in out
+
+    def test_delete_removes_block(self) -> None:
+        out = index.splice_blocks(_SAMPLE, {}, ["controllers/UserController.java"])
+        assert "CTRL UserController" not in out
+        assert "SERVICE UserService" in out
+
+    def test_append_new_module(self) -> None:
+        new = "# src: repo/UserRepo.java\nREPO UserRepo"
+        out = index.splice_blocks(_SAMPLE, {"repo/UserRepo.java": new})
+        assert "REPO UserRepo" in out
+        # Original blocks remain, and the new one is now addressable.
+        assert "SERVICE UserService" in out
+        assert "repo/UserRepo.java" in index.module_paths(out)
+
+
 class TestNoAnnotations:
     def test_module_paths_empty(self) -> None:
         assert index.module_paths("SERVICE X\n  ACTION do -> DTO\n") == []

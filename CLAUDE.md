@@ -43,7 +43,7 @@ The pipeline flows in one direction across small single-purpose modules in `focl
 
 3. **`sharder.py`** — Large projects can't fit in one API call. `shard_project()` groups files by top-level directory, then bin-packs each group (first-fit decreasing) into shards under a token `budget` (`DEFAULT_SHARD_BUDGET = 80_000`). A file exceeding the budget alone becomes its own `oversize` shard. Token counting delegates to `providers.count_tokens`/`estimate_tokens` (re-exported as `_estimate_tokens` for tests).
 
-4. **`generator.py`** — Orchestrates compression. `generate()` estimates total size; if under `_SINGLE_CALL_THRESHOLD` (60K) it compresses in one call, otherwise it shards, compresses each shard, and merges with a header. `update()` powers `watch` — it sends the existing `.focl` plus changed files and asks the model to patch only the affected blocks (located by `# src:` annotations). All calls go through `_invoke()` → `providers.generate_text()`. The FOCL grammar lives entirely in `_SYSTEM_PROMPT` here; the actual LLM call is in `providers.py`.
+4. **`generator.py`** — Orchestrates compression. `generate()` estimates total size; if under `_SINGLE_CALL_THRESHOLD` (60K) it compresses in one call, otherwise it shards, compresses each shard, and merges with a header. `update()` powers `watch` and is **surgical**: it regenerates only the FOCL block for each changed file (`_compress_file_block`) and splices it back with `index.splice_blocks` (deleted→drop, new→append); it falls back to a whole-file rewrite (`_update_whole`) only when the `.focl` has no `# src:` blocks. All model calls go through `_invoke()` → `providers.generate_text()`. The FOCL grammar lives entirely in `_SYSTEM_PROMPT` here; the actual LLM call is in `providers.py`.
 
 5. **`metrics.py`** — `measure()` / `measure_from_paths()` compute token- and byte-based compression stats into `CompressionMetrics`. Token counts reuse `providers.count_tokens` / `estimate_tokens` so estimates stay consistent across the codebase.
 
@@ -53,7 +53,7 @@ The pipeline flows in one direction across small single-purpose modules in `focl
 
 ### Claude Code integration layer
 
-- **`index.py`** — parses a generated `.focl` back into `{source_path: block}` by its `# src:` annotations (`parse_focl_blocks`, `module_paths`, `get_module`, `overview`, `header`). Pure/offline; the keystone for the MCP server and future surgical patching in `update()`.
+- **`index.py`** — parses a generated `.focl` back into `{source_path: block}` by its `# src:` annotations (`parse_focl_blocks`, `module_paths`, `get_module`, `overview`, `header`) and provides the splice primitives (`split_segments`, `splice_blocks`) used by surgical `update()`. Pure/offline; the keystone for the MCP server and surgical patching.
 - **`mcp_server.py`** — `focl mcp` runtime. A thin FastMCP wrapper over `index` exposing tools (`focl_overview`, `focl_list_modules`, `focl_module`) and the `focl://project` resource; re-reads the `.focl` on every call so edits show up live. `mcp` is an optional dep (`[mcp]` extra), imported lazily.
 
 ### Key cross-module conventions
@@ -65,7 +65,7 @@ The pipeline flows in one direction across small single-purpose modules in `focl
 
 ## Testing notes
 
-Tests cover the offline machinery only (analyzer, sharder, metrics estimates, watcher, `cli plan`); they do **not** call or mock the LLM generation API, so `generator`/`providers.generate_text` behaviour is untested. Fixtures in `tests/conftest.py` build minimal throwaway projects (Spring Boot, Python, ignored-files, oversize-file) under `tmp_path`. CI runs the suite on Python 3.10–3.12 across Linux/macOS/Windows.
+Tests run fully offline. Most cover the offline machinery directly (analyzer, sharder, metrics estimates, watcher, index/splice, the CLI scaffolding + `plan`/`check`); `test_generator.py` covers `update()` orchestration by **stubbing** `generator.generate_text`, so no real network call is made. The single-shot/sharded `generate()` path against a live provider is still not exercised. `test_mcp_server.py` is skipped unless the optional `[mcp]` extra is installed. Fixtures in `tests/conftest.py` build minimal throwaway projects (Spring Boot, Python, ignored-files, oversize-file) under `tmp_path`. CI runs the suite on Python 3.10–3.12 across Linux/macOS/Windows.
 
 ## Versioning
 

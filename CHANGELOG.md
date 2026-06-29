@@ -18,11 +18,24 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Surgical incremental update.** `focl watch` / `generator.update()` now
+  regenerate only the FOCL block of each changed file (located by its `# src:`
+  annotation) and splice it back in place via `index.splice_blocks`, instead of
+  resending the whole `.focl` and rewriting it. Deleted files drop their block;
+  new files append one; everything else is left byte-for-byte unchanged. Falls
+  back to the previous whole-file rewrite when the `.focl` has no `# src:`
+  blocks to target. Cheaper, faster, and no drift on untouched blocks.
+
+### Added
+- `index.split_segments()` and `index.splice_blocks()` — the pure, tested
+  splice primitives behind the surgical update.
+- `tests/test_generator.py` — covers `update()` orchestration (replace / delete
+  / append / fallback) with the LLM call stubbed.
+
 ### Planned
 - `focl validate` — verify `.focl` file structure and primitive usage
 - `focl decompile` — reconstruct source from `.focl` (round-trip proof)
-- Surgical patch in `update()` — patch only blocks affected by changed files
-  (now unblocked by `focl/index.py`)
 - Externalise system prompts to `focl/prompts/` as loadable resources
 - Distributable Claude Code plugin (bundle MCP + skill + hook + commands)
 

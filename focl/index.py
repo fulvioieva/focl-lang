@@ -82,6 +82,70 @@ def get_module(content: str, path: str) -> str | None:
     return None
 
 
+def _norm(path: str | None) -> str | None:
+    return None if path is None else path.replace("\\", "/")
+
+
+def split_segments(content: str) -> list[tuple[str | None, str]]:
+    """Split a .focl into ordered ``(src_path | None, raw_text)`` segments.
+
+    The first segment (path ``None``) is the preamble; each ``# src:`` line
+    starts a new segment that runs until the next marker. Joining the texts
+    reproduces ``content`` byte-for-byte, so segments are safe to splice.
+    """
+    segments: list[tuple[str | None, str]] = []
+    cur_path: str | None = None
+    cur: list[str] = []
+    for line in content.splitlines(keepends=True):
+        if _src_path(line) is not None:
+            segments.append((cur_path, "".join(cur)))
+            cur_path = _src_path(line)
+            cur = [line]
+        else:
+            cur.append(line)
+    segments.append((cur_path, "".join(cur)))
+    return segments
+
+
+def splice_blocks(content: str,
+                  replacements: dict[str, str],
+                  deletions: tuple[str, ...] | list[str] = ()) -> str:
+    """Return ``content`` with per-module blocks replaced/removed/appended.
+
+    - ``replacements``: ``{source_path: new_block_text}``. A path matching an
+      existing ``# src:`` block (after slash normalisation) replaces it in place,
+      preserving the original block's trailing whitespace; an unmatched path is
+      appended as a new block.
+    - ``deletions``: source paths whose blocks are removed.
+
+    Matching is exact on the normalised path — never a suffix match — so a
+    surgical update can't clobber the wrong block. The preamble is preserved.
+    """
+    segments = split_segments(content)
+    deletions_n = {_norm(d) for d in deletions}
+    repl_n = {_norm(k): v for k, v in replacements.items()}
+
+    out: list[str] = []
+    used: set[str | None] = set()
+    for path, text in segments:
+        pn = _norm(path)
+        if pn is not None and pn in deletions_n:
+            continue
+        if pn is not None and pn in repl_n:
+            trailing = text[len(text.rstrip("\n")):] or "\n"
+            out.append(repl_n[pn].rstrip("\n") + trailing)
+            used.add(pn)
+        else:
+            out.append(text)
+
+    for pn, block in repl_n.items():
+        if pn in used or pn in deletions_n:
+            continue
+        out.append("\n" + block.strip() + "\n")
+
+    return "".join(out)
+
+
 def overview(content: str) -> str:
     """A compact orientation string: header + the list of available modules."""
     paths = module_paths(content)

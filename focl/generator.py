@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from . import __version__
+from . import __version__, index
 from .analyzer import ProjectInfo, build_context, wrap_file
 from .providers import LLMConfig, estimate_tokens, generate_text
 from .sharder import (
@@ -123,35 +123,78 @@ def generate(info: ProjectInfo,
 def update(focl_path: Path, changed_files: list[Path], root: Path,
            api_key: str | None = None,
            config: LLMConfig | None = None) -> str:
-    """Patch an existing .focl file given a list of changed source files."""
+    """Patch an existing .focl file given a list of changed source files.
+
+    Surgical by default: each changed file's FOCL block (located by its
+    ``# src:`` annotation) is regenerated and spliced back in place — the rest
+    of the file is left byte-for-byte unchanged, and only the changed files are
+    sent to the model. Deleted files drop their block; new files append one.
+
+    Falls back to a whole-file rewrite when the existing ``.focl`` carries no
+    ``# src:`` annotations to target.
+    """
     config = config or LLMConfig(api_key=api_key)
     config.require_api_key()
 
-    existing_focl = focl_path.read_text(encoding="utf-8")
+    existing = focl_path.read_text(encoding="utf-8")
 
+    if not index.module_paths(existing):
+        return _update_whole(config, existing, changed_files, root)
+
+    replacements: dict[str, str] = {}
+    deletions: list[str] = []
+    for f in changed_files:
+        rel = _rel_path(f, root)
+        if not f.exists():
+            deletions.append(rel)
+            continue
+        content = f.read_text(encoding="utf-8", errors="replace")
+        replacements[rel] = _compress_file_block(config, rel, content)
+
+    return index.splice_blocks(existing, replacements, deletions)
+
+
+def _rel_path(f: Path, root: Path) -> str:
+    """Forward-slashed path of ``f`` relative to ``root`` (falls back to name)."""
+    try:
+        return str(f.relative_to(root)).replace("\\", "/")
+    except ValueError:
+        return f.name
+
+
+def _compress_file_block(config: LLMConfig, rel_path: str, content: str) -> str:
+    """Regenerate the FOCL block for a single source file."""
+    user_message = (
+        "Convert ONLY the single source file below into one FOCL block.\n"
+        f"Begin the block with `# src: {rel_path}` exactly.\n"
+        "Apply maximum compression. Output FOCL only — no fences, no other files.\n\n"
+        + wrap_file(rel_path, content)
+    )
+    block = _invoke(config, user_message)
+    if not block.lstrip().startswith("# src:"):
+        block = f"# src: {rel_path}\n{block}"
+    return block
+
+
+def _update_whole(config: LLMConfig, existing: str,
+                  changed_files: list[Path], root: Path) -> str:
+    """Whole-file rewrite fallback for .focl files without `# src:` blocks."""
     changed_content_parts: list[str] = []
     for f in changed_files:
         try:
             content = f.read_text(encoding="utf-8", errors="replace")
-            rel = f.relative_to(root)
-            changed_content_parts.append(wrap_file(rel, content))
+            changed_content_parts.append(wrap_file(_rel_path(f, root), content))
         except OSError:
             changed_content_parts.append(f"=== {f.name} === [DELETED]")
-        except ValueError:
-            # File is not under root (shouldn't happen via watcher, but be safe)
-            changed_content_parts.append(f"=== {f.name} === [OUT_OF_ROOT]")
 
     changed_content = "\n\n".join(changed_content_parts)
-
     user_message = (
         "Below is the current .focl file, followed by the updated source files.\n"
-        "Update only the affected FOCL blocks (identified by `# src:` annotations).\n"
-        "Keep everything else byte-for-byte unchanged.\n"
+        "Update only the affected parts and keep everything else unchanged.\n"
         "Output the complete updated .focl file only.\n\n"
-        f"## Current .focl\n{existing_focl}\n\n"
+        f"## Current .focl\n{existing}\n\n"
         f"## Changed files\n{changed_content}"
     )
-
     return _invoke(config, user_message)
 
 
