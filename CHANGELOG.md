@@ -27,6 +27,54 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.2.0] — 2026-06-29
+
+### Added
+- **Pluggable LLM provider.** New `focl/providers.py` — the only module that
+  imports a vendor SDK — holding `LLMConfig` (provider, model, api_key,
+  base_url) plus `generate_text()`, `count_tokens()`, and `estimate_tokens()`.
+- **OpenRouter support** via the OpenAI-compatible Chat Completions API, behind
+  the optional `[openrouter]` extra (`pip install -e ".[openrouter]"`). Use any
+  model OpenRouter exposes (`anthropic/*`, `openai/*`, `google/*`, …).
+- **CLI provider switch** on `init`, `sync`, `watch`, and `stats`:
+  `--provider {anthropic,openrouter}`, `--model`, `--api-key`, `--base-url`
+  (applied via the shared `_llm_options` decorator). The API key is read from
+  `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` depending on the provider.
+- `.gitattributes` normalising line endings to LF.
+
+### Changed
+- Token counting and the lone vendor-SDK import moved into `focl/providers.py`;
+  `sharder`, `metrics`, and `generator` now delegate to it. `LLMConfig` is
+  threaded through `generate`/`update`/`shard_project`/`measure` (a legacy
+  `api_key=` argument is still accepted and builds a default Anthropic config).
+- `--exact-tokens` remains Anthropic-only; other providers fall back to the
+  offline estimate.
+
+### Notes
+- Default behaviour is unchanged: Anthropic provider, model `claude-opus-4-7`.
+
+---
+
+## [0.1.3] — 2026-06-29
+
+### Added
+- `CLAUDE.md` — repository guidance for AI coding assistants.
+- `.gitignore` for Python build artefacts, caches, virtualenvs, and `.focl`
+  output.
+
+### Changed
+- Internal de-duplication refactor (no behaviour change): single
+  `analyzer.wrap_file()` for the `=== relpath ===` block format; `estimate_tokens`
+  promoted from the private `_estimate_tokens`; a single shared model constant;
+  a shared `_generate_and_report()` helper behind `init`/`sync`. The generated
+  sharded-file header now reads `__version__`.
+
+### Fixed
+- Version drift: `focl/__init__.py` and `pyproject.toml` synced (were `0.1.2`).
+- Variable shadowing of the `path` argument in `init`'s skipped-files loop.
+
+---
+
 ## [0.1.2] — 2026-04-20
 
 ### Fixed
