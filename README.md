@@ -141,7 +141,25 @@ and infers the target language from the `.focl` header.
 
 FOCL plugs into [Claude Code](https://claude.com/claude-code) on four levels.
 
-**One-shot setup** — after `focl init`, scaffold everything:
+**Install as a plugin** (recommended) — bundles the MCP server, a freshness
+hook, helper commands, and the skill:
+
+```text
+/plugin marketplace add fulvioieva/focl-lang
+/plugin install focl@focl-lang
+```
+
+The plugin is the glue; the engine is the `focl` CLI, so install it too and
+generate the map once:
+
+```bash
+pip install "focl[mcp]"
+focl init .
+```
+
+See [`plugin/`](plugin/) for what the plugin contains.
+
+**Or scaffold the same wiring into your project** (no plugin needed) — after `focl init`:
 
 ```bash
 focl claude-setup .

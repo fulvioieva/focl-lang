@@ -1,0 +1,19 @@
+{
+  "name": "focl-lang",
+  "description": "FOCL — read your codebase through a token-compressed map in Claude Code.",
+  "owner": {
+    "name": "Fulvio Ieva",
+    "url": "https://github.com/fulvioieva"
+  },
+  "plugins": [
+    {
+      "name": "focl",
+      "source": "./plugin",
+      "description": "Read your codebase through a token-compressed FOCL map in Claude Code: MCP tools (focl_overview / focl_module), a SessionStart freshness hook, helper commands, and a skill.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Fulvio Ieva"
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "focl",
+  "displayName": "FOCL — AI-native codebase compression",
+  "version": "0.1.0",
+  "description": "Read your codebase through a token-compressed FOCL map: an MCP server, a freshness hook, helper commands, and a skill that tells Claude when to use the map.",
+  "author": {
+    "name": "Fulvio Ieva",
+    "url": "https://github.com/fulvioieva"
+  },
+  "homepage": "https://github.com/fulvioieva/focl-lang",
+  "repository": "https://github.com/fulvioieva/focl-lang",
+  "license": "Apache-2.0",
+  "keywords": ["focl", "compression", "mcp", "context", "tokens", "codebase"]
+}

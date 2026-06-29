@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "focl": {
+      "command": "focl",
+      "args": ["mcp", "."]
+    }
+  }
+}

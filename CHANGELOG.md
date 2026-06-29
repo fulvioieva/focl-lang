@@ -18,6 +18,14 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Planned
+- `focl validate` — verify `.focl` file structure and primitive usage
+- Externalise system prompts to `focl/prompts/` as loadable resources
+
+---
+
+## [0.4.0] — 2026-06-29
+
 ### Changed
 - **Surgical incremental update.** `focl watch` / `generator.update()` now
   regenerate only the FOCL block of each changed file (located by its `# src:`
@@ -28,6 +36,12 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   blocks to target. Cheaper, faster, and no drift on untouched blocks.
 
 ### Added
+- **Claude Code plugin** (`plugin/`) + marketplace (`.claude-plugin/marketplace.json`).
+  Installable with `/plugin marketplace add fulvioieva/focl-lang` then
+  `/plugin install focl@focl-lang`. Bundles the `focl` MCP server (`.mcp.json`),
+  a `SessionStart` freshness hook (`hooks/hooks.json` → `focl check`), helper
+  commands (`/focl:focl-sync`, `/focl:focl-decompile`), and the `focl` skill.
+  Validated with `claude plugin validate`.
 - **`focl decompile`** — reconstruct source code from a `.focl` file (the
   round-trip / lossless proof). Decompiles per-module using the `# src:` index
   (each block back into its original path), falling back to a whole-project
@@ -40,10 +54,8 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `tests/test_generator.py` and `tests/test_decompiler.py` — cover the
   `update()` and `decompile()` orchestration with the LLM call stubbed.
 
-### Planned
-- `focl validate` — verify `.focl` file structure and primitive usage
-- Externalise system prompts to `focl/prompts/` as loadable resources
-- Distributable Claude Code plugin (bundle MCP + skill + hook + commands)
+### Notes
+- New optional extra `[mcp]`; test suite grows to 96.
 
 ---
 
