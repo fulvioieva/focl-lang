@@ -126,6 +126,16 @@ Show compression statistics.
 focl stats .
 ```
 
+### `focl validate [path]`
+Check a `.focl` file's structure — offline, no API. Errors on definite defects
+(code fences, empty blocks, `# src:` with no path), warns on missing/duplicate
+annotations, and prints stats. Use `--strict` to fail on warnings (CI).
+
+```bash
+focl validate .
+focl validate . --strict
+```
+
 ### `focl decompile [path]`
 Reconstruct source code from the `.focl` file — the round-trip / lossless proof.
 

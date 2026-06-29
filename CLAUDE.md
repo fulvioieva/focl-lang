@@ -27,6 +27,7 @@ focl watch [path]     # watch sources and incrementally patch the .focl
 focl stats [path]     # show compression metrics for an existing .focl
 focl plan [path]      # preview the sharding plan WITHOUT calling the API (offline, free)
 focl check [path]     # offline: is the .focl stale vs the sources? (no API)
+focl validate [path]  # offline: check .focl structure (--strict fails on warnings)
 focl mcp [path]       # run the MCP server exposing the .focl (needs [mcp] extra)
 focl claude-setup     # scaffold Claude Code integration (CLAUDE.md, .mcp.json, hook, skill)
 focl decompile [path] # reconstruct source from the .focl (round-trip; calls the LLM)
@@ -50,13 +51,14 @@ The pipeline flows in one direction across small single-purpose modules in `focl
 
 6. **`watcher.py`** — `watch()` uses watchdog with a debounced handler that coalesces rapid events. It deliberately ignores `.focl` files (to avoid self-triggered rebuild loops) and reuses the analyzer's ignore sets. On change it calls back into `generator.update()`.
 
-7. **`cli.py`** — Click command group wiring the above together with `rich` for progress/tables. The shared `--provider/--model/--api-key/--base-url` options are applied via the `_llm_options` decorator and turned into an `LLMConfig` by `_build_config`. Also holds the Claude Code scaffolding helpers (`_upsert_claude_pointer`, `_merge_mcp_json`, `_merge_settings_hook`, `_render_skill`) — all pure and unit-tested — plus the `check`, `mcp`, and `claude-setup` commands. Note `watch` is defined as `watch_cmd` and registered with `name="watch"` (the name avoids shadowing the imported `watch` function).
+7. **`cli.py`** — Click command group wiring the above together with `rich` for progress/tables. The shared `--provider/--model/--api-key/--base-url` options are applied via the `_llm_options` decorator and turned into an `LLMConfig` by `_build_config`. Also holds the Claude Code scaffolding helpers (`_upsert_claude_pointer`, `_merge_mcp_json`, `_merge_settings_hook`, `_render_skill`) — all pure and unit-tested — plus the `check`, `mcp`, `validate`, `decompile`, and `claude-setup` commands. CLI console output is kept cp1252-safe (ASCII `->`, word labels — no `→`/`✗`/`⚠`) so `rich` doesn't crash on the legacy Windows console. Note `watch` is defined as `watch_cmd` and registered with `name="watch"` (the name avoids shadowing the imported `watch` function).
 
 ### Claude Code integration layer
 
 - **`index.py`** — parses a generated `.focl` back into `{source_path: block}` by its `# src:` annotations (`parse_focl_blocks`, `module_paths`, `get_module`, `overview`, `header`) and provides the splice primitives (`split_segments`, `splice_blocks`) used by surgical `update()`. Pure/offline; the keystone for the MCP server and surgical patching.
 - **`mcp_server.py`** — `focl mcp` runtime. A thin FastMCP wrapper over `index` exposing tools (`focl_overview`, `focl_list_modules`, `focl_module`) and the `focl://project` resource; re-reads the `.focl` on every call so edits show up live. `mcp` is an optional dep (`[mcp]` extra), imported lazily.
 - **`plugin/`** + **`.claude-plugin/marketplace.json`** — the distributable Claude Code plugin (manifest, `.mcp.json` registering `focl mcp`, `hooks/hooks.json` → `focl check`, `commands/`, `skills/focl/`) and the marketplace that lists it. These are static config, not Python; the plugin assumes the `focl` CLI is pip-installed. Validate with `claude plugin validate ./plugin` and `claude plugin validate .`.
+- **`validator.py`** — pure, offline structural checks for a `.focl` (`validate(content) -> ValidationResult` with `errors`/`warnings`/`stats`). Deliberately lenient about the open grammar: it flags only reliable defects (fences, empty/path-less `# src:`, empty blocks) plus advisory warnings. Powers `focl validate`.
 - **`decompiler.py`** — the reverse direction (`focl decompile`). Per-module reconstruction keyed by the `# src:` index (`_decompile_block`), with a whole-project fallback (`_decompile_whole` → `_split_files` on `=== path ===` headers) when there are no annotations. Its own `_SYSTEM_PROMPT`; model call via `providers.generate_text`. The CLI command writes files under a `_safe_join` guard (rejects paths escaping the output dir).
 
 ### Key cross-module conventions

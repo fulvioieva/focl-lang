@@ -18,8 +18,18 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`focl validate`** — offline structural check of a `.focl` file (no API).
+  Errors on definite defects (empty file, markdown code fences, a `# src:`
+  with no path, empty blocks); warns on missing annotations and duplicate
+  paths; prints stats (modules, lines, a primitive histogram). `--strict`
+  treats warnings as errors for CI. New pure module `focl/validator.py`.
+
+### Fixed
+- CLI output is now cp1252-safe (replaced `→`/`✗`/`⚠` with ASCII), avoiding a
+  `UnicodeEncodeError` crash from `rich` on the legacy Windows console.
+
 ### Planned
-- `focl validate` — verify `.focl` file structure and primitive usage
 - Externalise system prompts to `focl/prompts/` as loadable resources
 
 ---

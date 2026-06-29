@@ -21,6 +21,7 @@ from .mcp_server import serve as mcp_serve
 from .metrics import measure, measure_from_paths
 from .providers import DEFAULT_PROVIDER, PROVIDERS, LLMConfig
 from .sharder import DEFAULT_SHARD_BUDGET
+from .validator import validate as validate_focl
 from .watcher import watch
 
 console = Console()
@@ -197,7 +198,7 @@ def _print_compression_report(info, focl_content: str,
     console.print(f"  Token ratio:     {m.token_ratio:>10.1f}x")
     console.print(f"  [bold]Token saving:    {m.token_saving_pct:>10.1f}%[/bold]")
     console.print(
-        f"  [dim](Bytes: {m.source_bytes / 1024:.0f} KB → "
+        f"  [dim](Bytes: {m.source_bytes / 1024:.0f} KB -> "
         f"{m.focl_bytes / 1024:.0f} KB = {m.byte_saving_pct:.0f}% smaller)[/dim]"
     )
 
@@ -292,7 +293,7 @@ def init(path: str, output: str | None, provider: str, model: str | None,
 
     if claude_md:
         _write_claude_pointer(root, out.name)
-        console.print(f"  [green]CLAUDE.md[/green] updated → points Claude Code at {out.name}")
+        console.print(f"  [green]CLAUDE.md[/green] updated -> points Claude Code at {out.name}")
 
 
 @main.command()
@@ -322,7 +323,7 @@ def sync(path: str, focl_file: str | None, provider: str, model: str | None,
 
     if claude_md:
         _write_claude_pointer(root, out.name)
-        console.print(f"  [green]CLAUDE.md[/green] updated → points Claude Code at {out.name}")
+        console.print(f"  [green]CLAUDE.md[/green] updated -> points Claude Code at {out.name}")
 
 
 @main.command()
@@ -476,6 +477,39 @@ def mcp(path: str, focl_file: str | None) -> None:
 @main.command()
 @click.argument("path", default=".", required=False)
 @click.option("--focl-file", "-f", default=None, help="Path to the .focl file")
+@click.option("--strict", is_flag=True, help="Treat warnings as errors (exit non-zero)")
+def validate(path: str, focl_file: str | None, strict: bool) -> None:
+    """Check a .focl file's structure and primitive usage (offline)."""
+    root = _resolve_root(path)
+    out = Path(focl_file).resolve() if focl_file else _focl_path(root, None)
+    if not out.exists():
+        console.print(f"[red]Error:[/red] {out.name} not found. Run 'focl init' first.")
+        sys.exit(1)
+
+    result = validate_focl(out.read_text(encoding="utf-8"))
+
+    for err in result.errors:
+        console.print(f"  [red]ERROR[/red] {err}")
+    for warn in result.warnings:
+        console.print(f"  [yellow]WARN[/yellow]  {warn}")
+
+    prims = result.stats.get("primitives", {})
+    prim_summary = ", ".join(f"{k}×{v}" for k, v in sorted(prims.items())) or "none"
+    console.print(
+        f"  [dim]{result.stats.get('modules', 0)} modules, "
+        f"{result.stats.get('lines', 0)} lines · primitives: {prim_summary}[/dim]"
+    )
+
+    failed = bool(result.errors) or (strict and bool(result.warnings))
+    if failed:
+        console.print(f"[red]Invalid[/red] {out.name}")
+        sys.exit(1)
+    console.print(f"[green]Valid[/green] {out.name}")
+
+
+@main.command()
+@click.argument("path", default=".", required=False)
+@click.option("--focl-file", "-f", default=None, help="Path to the .focl file")
 def check(path: str, focl_file: str | None) -> None:
     """Report whether the .focl map is up to date with the sources (offline)."""
     root = _resolve_root(path)
@@ -557,7 +591,7 @@ def decompile(path: str, focl_file: str | None, output: str | None, lang: str | 
 
     console.print(
         f"\n[bold green]Done[/bold green] — {written} file(s), "
-        f"{total_bytes / 1024:.0f} KB → {out_dir}"
+        f"{total_bytes / 1024:.0f} KB -> {out_dir}"
     )
 
 
