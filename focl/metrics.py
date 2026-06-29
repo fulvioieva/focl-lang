@@ -77,9 +77,9 @@ def measure(info: ProjectInfo, focl_content: str,
         focl_tokens = count_tokens(focl_content, api_key=api_key)
     else:
         # Reuse the estimator from sharder so heuristics stay consistent
-        from .sharder import _estimate_tokens
-        source_tokens = _estimate_tokens(source_text)
-        focl_tokens = _estimate_tokens(focl_content)
+        from .sharder import estimate_tokens
+        source_tokens = estimate_tokens(source_text)
+        focl_tokens = estimate_tokens(focl_content)
 
     return CompressionMetrics(
         source_tokens=source_tokens,

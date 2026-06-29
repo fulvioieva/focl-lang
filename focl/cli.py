@@ -55,6 +55,41 @@ def _print_compression_report(info, focl_content: str,
     )
 
 
+def _generate_and_report(info, out: Path, *, api_key: str | None,
+                         shard_budget: int, exact_tokens: bool,
+                         fail_label: str) -> None:
+    """Run generation under a progress spinner, write the .focl, print the report.
+
+    Shared by `init` and `sync`, which differ only in the failure label shown.
+    """
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+                  console=console) as progress:
+        task = progress.add_task("Starting...", total=None)
+
+        def on_progress(msg: str) -> None:
+            progress.update(task, description=msg)
+
+        t0 = time.time()
+        try:
+            focl_content = generate(
+                info,
+                api_key=api_key,
+                shard_budget=shard_budget,
+                use_api_counter=exact_tokens,
+                progress=on_progress,
+            )
+        except Exception as e:
+            progress.update(task, description=f"[red]{fail_label}[/red]")
+            console.print(f"\n[red]Error:[/red] {e}")
+            sys.exit(1)
+        elapsed = time.time() - t0
+        progress.update(task, description="[green]Done[/green]", completed=True)
+
+    out.write_text(focl_content, encoding="utf-8")
+    _print_compression_report(info, focl_content, elapsed, out.name,
+                              api_key=api_key, exact=exact_tokens)
+
+
 @click.group()
 @click.version_option(__version__, prog_name="focl")
 def main() -> None:
@@ -93,39 +128,15 @@ def init(path: str, output: str | None, api_key: str | None, force: bool,
             f"  [yellow]Skipped:[/yellow]  {len(info.skipped_files)} file(s) "
             f"too large to process:"
         )
-        for path, reason in info.skipped_files[:5]:
+        for skipped_path, reason in info.skipped_files[:5]:
             try:
-                rel = path.relative_to(root)
+                rel = skipped_path.relative_to(root)
             except ValueError:
-                rel = path
+                rel = skipped_path
             console.print(f"    • {rel} — {reason}")
 
-    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
-                  console=console) as progress:
-        task = progress.add_task("Starting...", total=None)
-
-        def on_progress(msg: str) -> None:
-            progress.update(task, description=msg)
-
-        t0 = time.time()
-        try:
-            focl_content = generate(
-                info,
-                api_key=api_key,
-                shard_budget=shard_budget,
-                use_api_counter=exact_tokens,
-                progress=on_progress,
-            )
-        except Exception as e:
-            progress.update(task, description="[red]Generation failed[/red]")
-            console.print(f"\n[red]Error:[/red] {e}")
-            sys.exit(1)
-        elapsed = time.time() - t0
-        progress.update(task, description="[green]Done[/green]", completed=True)
-
-    out.write_text(focl_content, encoding="utf-8")
-    _print_compression_report(info, focl_content, elapsed, out.name,
-                              api_key=api_key, exact=exact_tokens)
+    _generate_and_report(info, out, api_key=api_key, shard_budget=shard_budget,
+                         exact_tokens=exact_tokens, fail_label="Generation failed")
 
 
 @main.command()
@@ -145,32 +156,8 @@ def sync(path: str, focl_file: str | None, api_key: str | None,
     console.print(f"[bold]FOCL[/bold] syncing [cyan]{root}[/cyan]")
     info = detect(root)
 
-    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
-                  console=console) as progress:
-        task = progress.add_task("Starting...", total=None)
-
-        def on_progress(msg: str) -> None:
-            progress.update(task, description=msg)
-
-        t0 = time.time()
-        try:
-            focl_content = generate(
-                info,
-                api_key=api_key,
-                shard_budget=shard_budget,
-                use_api_counter=exact_tokens,
-                progress=on_progress,
-            )
-        except Exception as e:
-            progress.update(task, description="[red]Sync failed[/red]")
-            console.print(f"\n[red]Error:[/red] {e}")
-            sys.exit(1)
-        elapsed = time.time() - t0
-        progress.update(task, description="[green]Done[/green]", completed=True)
-
-    out.write_text(focl_content, encoding="utf-8")
-    _print_compression_report(info, focl_content, elapsed, out.name,
-                              api_key=api_key, exact=exact_tokens)
+    _generate_and_report(info, out, api_key=api_key, shard_budget=shard_budget,
+                         exact_tokens=exact_tokens, fail_label="Sync failed")
 
 
 @main.command()

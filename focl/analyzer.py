@@ -125,6 +125,15 @@ def _collect_files(root: Path, extensions: set[str]
     return result, skipped
 
 
+def wrap_file(rel: Path | str, content: str) -> str:
+    """Format a single file as a delimited block for the model context.
+
+    This `=== relpath ===` shape is the universal interchange format shared by
+    the analyzer, sharder, generator, and metrics — keep it defined here only.
+    """
+    return f"=== {rel} ===\n{content}"
+
+
 def build_context(info: ProjectInfo) -> str:
     """Concatenate all source files into a single context string."""
     parts: list[str] = []
@@ -134,5 +143,5 @@ def build_context(info: ProjectInfo) -> str:
         except OSError:
             continue
         rel = f.relative_to(info.root)
-        parts.append(f"=== {rel} ===\n{content}")
+        parts.append(wrap_file(rel, content))
     return "\n\n".join(parts)

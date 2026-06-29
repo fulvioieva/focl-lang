@@ -20,7 +20,11 @@ from pathlib import Path
 
 import anthropic
 
-from .analyzer import ProjectInfo
+from .analyzer import ProjectInfo, wrap_file
+
+# Single source of truth for the Claude model used across the package, both
+# for generation (generator.py) and for token counting below.
+MODEL = "claude-opus-4-7"
 
 # Default budget per shard: conservative to leave room for system prompt,
 # instructions, and model output. Opus 4.7 accepts 1M input tokens, but
@@ -54,7 +58,7 @@ class ShardingResult:
 
 
 def count_tokens(text: str, api_key: str | None = None,
-                 model: str = "claude-opus-4-7") -> int:
+                 model: str = MODEL) -> int:
     """Count tokens using the Anthropic API when possible, else estimate.
 
     The API call is cheap (free, does not charge as a generation) but adds
@@ -63,7 +67,7 @@ def count_tokens(text: str, api_key: str | None = None,
     """
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not key:
-        return _estimate_tokens(text)
+        return estimate_tokens(text)
     try:
         client = anthropic.Anthropic(api_key=key)
         result = client.messages.count_tokens(
@@ -72,12 +76,16 @@ def count_tokens(text: str, api_key: str | None = None,
         )
         return int(result.input_tokens)
     except Exception:
-        return _estimate_tokens(text)
+        return estimate_tokens(text)
 
 
-def _estimate_tokens(text: str) -> int:
+def estimate_tokens(text: str) -> int:
     """Fast offline estimate of token count based on character length."""
     return int(len(text) / _CHARS_PER_TOKEN) + 1
+
+
+# Backwards-compatible alias: this helper used to be private.
+_estimate_tokens = estimate_tokens
 
 
 def shard_project(info: ProjectInfo,
@@ -113,11 +121,11 @@ def shard_project(info: ProjectInfo,
         parts = rel.parts
         group_key = parts[0] if len(parts) > 1 else "root"
 
-        wrapped = f"=== {rel} ===\n{content}"
+        wrapped = wrap_file(rel, content)
         if use_api_counter:
             tokens = count_tokens(wrapped, api_key=api_key)
         else:
-            tokens = _estimate_tokens(wrapped)
+            tokens = estimate_tokens(wrapped)
 
         total_tokens += tokens
 
@@ -178,5 +186,5 @@ def build_shard_context(shard: Shard, root: Path) -> str:
         except OSError:
             continue
         rel = f.relative_to(root)
-        parts.append(f"=== {rel} ===\n{content}")
+        parts.append(wrap_file(rel, content))
     return "\n\n".join(parts)
