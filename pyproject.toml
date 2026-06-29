@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "focl"
-version = "0.2.0"
+version = "0.3.0"
 description = "AI-native codebase compression — generate and maintain .focl files"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -35,6 +35,10 @@ dependencies = [
 # OpenRouter support (OpenAI-compatible Chat Completions API).
 openrouter = [
     "openai>=1.0",
+]
+# MCP server (`focl mcp`) for Claude Code and other MCP clients.
+mcp = [
+    "mcp>=1.0",
 ]
 dev = [
     "pytest>=7.0",

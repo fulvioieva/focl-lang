@@ -126,6 +126,44 @@ Show compression statistics.
 focl stats .
 ```
 
+## Claude Code integration
+
+FOCL plugs into [Claude Code](https://claude.com/claude-code) on four levels.
+
+**One-shot setup** — after `focl init`, scaffold everything:
+
+```bash
+focl claude-setup .
+```
+
+This writes (merging into anything that already exists):
+- a `CLAUDE.md` pointer telling Claude Code to read the compressed map first;
+- `.mcp.json` registering the **FOCL MCP server** (`focl mcp`);
+- a `SessionStart` hook in `.claude/settings.json` that runs `focl check`;
+- a Claude Code **skill** describing when to consult the map.
+
+Use `--dry-run` to preview. Then restart Claude Code.
+
+The individual pieces:
+
+### `focl mcp [path]`
+Run an MCP server exposing the `.focl` map so Claude Code can pull *compressed*
+context on demand — tools `focl_overview`, `focl_list_modules`,
+`focl_module(path)`, and the `focl://project` resource. Requires the extra:
+
+```bash
+pip install -e ".[mcp]"
+```
+
+### `focl check [path]`
+Offline freshness check (no API call): compares source mtimes against the
+`.focl` and reports whether it's up to date or stale. The `SessionStart` hook
+runs this so Claude is told up front when to `focl sync`.
+
+### `focl init/sync --claude`
+Just the lightweight `CLAUDE.md` pointer, without the MCP/hook/skill scaffolding.
+Re-running refreshes the managed block in place.
+
 ## How it works
 
 1. **Detect** — scans the project to identify language and framework (Java/Spring Boot, TypeScript/React, Python, Go, …)

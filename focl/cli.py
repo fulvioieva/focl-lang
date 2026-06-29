@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+import json
 import sys
 import time
 from pathlib import Path
@@ -14,6 +16,7 @@ from rich.table import Table
 from . import __version__
 from .analyzer import detect
 from .generator import generate, update
+from .mcp_server import serve as mcp_serve
 from .metrics import measure, measure_from_paths
 from .providers import DEFAULT_PROVIDER, PROVIDERS, LLMConfig
 from .sharder import DEFAULT_SHARD_BUDGET
@@ -55,6 +58,128 @@ def _focl_path(root: Path, name: str | None) -> Path:
     if not fname.endswith(".focl"):
         fname += ".focl"
     return root / fname
+
+
+# --- CLAUDE.md integration ------------------------------------------------
+# A managed block, delimited by sentinels so re-running updates it in place
+# rather than appending duplicates.
+
+_CLAUDE_START = "<!-- focl:start -->"
+_CLAUDE_END = "<!-- focl:end -->"
+
+
+def _render_claude_section(focl_name: str) -> str:
+    """The managed CLAUDE.md block pointing Claude Code at the .focl map."""
+    return (
+        f"{_CLAUDE_START}\n"
+        "## Compressed codebase map (FOCL)\n\n"
+        f"A token-compressed map of this codebase is kept in `{focl_name}` "
+        "(~70–80% smaller than the source). For architecture or overview "
+        "questions, read that file first before grepping or reading the source "
+        "files. Drop to the actual source for line-level changes or details it "
+        "doesn't capture.\n\n"
+        "Regenerate it after significant changes with `focl sync`.\n"
+        f"{_CLAUDE_END}"
+    )
+
+
+def _upsert_claude_pointer(existing: str | None, focl_name: str) -> str:
+    """Return CLAUDE.md content with the FOCL block created/updated in place."""
+    import re
+
+    section = _render_claude_section(focl_name)
+    if not existing:
+        return section + "\n"
+    if _CLAUDE_START in existing and _CLAUDE_END in existing:
+        pattern = re.escape(_CLAUDE_START) + r".*?" + re.escape(_CLAUDE_END)
+        # Use a function replacement so backslashes in `section` aren't treated
+        # as regex escapes.
+        return re.sub(pattern, lambda _m: section, existing, count=1, flags=re.DOTALL)
+    sep = "" if existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
+    return existing + sep + section + "\n"
+
+
+def _write_claude_pointer(root: Path, focl_name: str) -> Path:
+    claude = root / "CLAUDE.md"
+    existing = claude.read_text(encoding="utf-8") if claude.exists() else None
+    claude.write_text(_upsert_claude_pointer(existing, focl_name), encoding="utf-8")
+    return claude
+
+
+# --- Freshness ------------------------------------------------------------
+
+
+def _newest_source_mtime(files: list[Path], exclude: Path | None = None) -> float | None:
+    """Most recent mtime among ``files`` (skipping ``exclude``), or None."""
+    newest: float | None = None
+    excl = exclude.resolve() if exclude else None
+    for f in files:
+        try:
+            if excl is not None and f.resolve() == excl:
+                continue
+            m = f.stat().st_mtime
+        except OSError:
+            continue
+        if newest is None or m > newest:
+            newest = m
+    return newest
+
+
+# --- Claude Code scaffolding (MCP registration, hook, skill) --------------
+
+
+def _merge_mcp_json(existing: dict | None) -> dict:
+    """Add/refresh the ``focl`` MCP server in a ``.mcp.json`` document."""
+    data = copy.deepcopy(existing) if existing else {}
+    servers = data.setdefault("mcpServers", {})
+    servers["focl"] = {"command": "focl", "args": ["mcp", "."]}
+    return data
+
+
+def _merge_settings_hook(existing: dict | None) -> dict:
+    """Add a SessionStart hook running ``focl check`` (offline freshness)."""
+    data = copy.deepcopy(existing) if existing else {}
+    hooks = data.setdefault("hooks", {})
+    session_start = hooks.setdefault("SessionStart", [])
+    already = any(
+        "focl check" in h.get("command", "")
+        for entry in session_start
+        for h in entry.get("hooks", [])
+    )
+    if not already:
+        session_start.append({"hooks": [{"type": "command", "command": "focl check"}]})
+    return data
+
+
+def _render_skill(focl_name: str) -> str:
+    """A Claude Code skill teaching when to consult the FOCL map."""
+    return (
+        "---\n"
+        "name: focl\n"
+        "description: Use the compressed FOCL codebase map for architecture, "
+        "overview, or \"where is X\" questions before grepping or reading source.\n"
+        "---\n\n"
+        "# FOCL codebase map\n\n"
+        f"A token-compressed map of this codebase is in `{focl_name}` "
+        "(~70–80% smaller than the source).\n\n"
+        "When the question is about architecture, structure, data flow, or "
+        f"\"where does X happen\", read `{focl_name}` first — or, if the `focl` "
+        "MCP server is connected, call `focl_overview` and then "
+        "`focl_module(path)` for the relevant file. Only drop to the actual "
+        "source files for line-level changes or details the map doesn't capture.\n\n"
+        "If the map looks stale, regenerate it with `focl sync`.\n"
+    )
+
+
+def _read_json(path: Path) -> dict | None:
+    """Read a JSON file, returning None on missing/invalid (with a warning)."""
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        console.print(f"  [yellow]Warning:[/yellow] {path.name} is not valid JSON — leaving it untouched.")
+        return None
 
 
 def _print_compression_report(info, focl_content: str,
@@ -126,9 +251,11 @@ def main() -> None:
               type=int, help="Max estimated tokens per shard for large codebases")
 @click.option("--exact-tokens", is_flag=True,
               help="Use the provider's exact token counter (Anthropic only; slower)")
+@click.option("--claude", "claude_md", is_flag=True,
+              help="Add a pointer to the .focl file in CLAUDE.md for Claude Code")
 def init(path: str, output: str | None, provider: str, model: str | None,
          api_key: str | None, base_url: str | None, force: bool,
-         shard_budget: int, exact_tokens: bool) -> None:
+         shard_budget: int, exact_tokens: bool, claude_md: bool) -> None:
     """Analyse a codebase and generate a .focl file."""
     root = _resolve_root(path)
     out = _focl_path(root, output)
@@ -162,6 +289,10 @@ def init(path: str, output: str | None, provider: str, model: str | None,
     _generate_and_report(info, out, config=config, shard_budget=shard_budget,
                          exact_tokens=exact_tokens, fail_label="Generation failed")
 
+    if claude_md:
+        _write_claude_pointer(root, out.name)
+        console.print(f"  [green]CLAUDE.md[/green] updated → points Claude Code at {out.name}")
+
 
 @main.command()
 @click.argument("path", default=".", required=False)
@@ -171,9 +302,11 @@ def init(path: str, output: str | None, provider: str, model: str | None,
               type=int, help="Max estimated tokens per shard for large codebases")
 @click.option("--exact-tokens", is_flag=True,
               help="Use the provider's exact token counter (Anthropic only)")
+@click.option("--claude", "claude_md", is_flag=True,
+              help="Add a pointer to the .focl file in CLAUDE.md for Claude Code")
 def sync(path: str, focl_file: str | None, provider: str, model: str | None,
          api_key: str | None, base_url: str | None,
-         shard_budget: int, exact_tokens: bool) -> None:
+         shard_budget: int, exact_tokens: bool, claude_md: bool) -> None:
     """Regenerate the .focl file from scratch (full re-analysis)."""
     root = _resolve_root(path)
     out = Path(focl_file).resolve() if focl_file else _focl_path(root, None)
@@ -185,6 +318,10 @@ def sync(path: str, focl_file: str | None, provider: str, model: str | None,
 
     _generate_and_report(info, out, config=config, shard_budget=shard_budget,
                          exact_tokens=exact_tokens, fail_label="Sync failed")
+
+    if claude_md:
+        _write_claude_pointer(root, out.name)
+        console.print(f"  [green]CLAUDE.md[/green] updated → points Claude Code at {out.name}")
 
 
 @main.command()
@@ -315,3 +452,91 @@ def plan(path: str, shard_budget: int) -> None:
 
 
 main.add_command(plan)
+
+
+@main.command()
+@click.argument("path", default=".", required=False)
+@click.option("--focl-file", "-f", default=None, help="Path to the .focl file to serve")
+def mcp(path: str, focl_file: str | None) -> None:
+    """Run an MCP server exposing the .focl map (for Claude Code, etc.)."""
+    root = _resolve_root(path)
+    out = Path(focl_file).resolve() if focl_file else _focl_path(root, None)
+    if not out.exists():
+        # Print to stderr — stdout is the MCP (JSON-RPC) channel.
+        click.echo(f"Error: {out.name} not found. Run 'focl init' first.", err=True)
+        sys.exit(1)
+    try:
+        mcp_serve(out)
+    except RuntimeError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@main.command()
+@click.argument("path", default=".", required=False)
+@click.option("--focl-file", "-f", default=None, help="Path to the .focl file")
+def check(path: str, focl_file: str | None) -> None:
+    """Report whether the .focl map is up to date with the sources (offline)."""
+    root = _resolve_root(path)
+    out = Path(focl_file).resolve() if focl_file else _focl_path(root, None)
+    if not out.exists():
+        console.print(
+            f"[yellow]FOCL map missing[/yellow] — run `focl init` to create {out.name}."
+        )
+        return
+
+    info = detect(root)
+    newest = _newest_source_mtime(info.files, exclude=out)
+    if newest is not None and newest > out.stat().st_mtime:
+        console.print(
+            f"[yellow]FOCL map is stale[/yellow] — sources changed since "
+            f"{out.name} was generated. Run `focl sync` to refresh it."
+        )
+    else:
+        console.print(f"[green]FOCL map is up to date[/green] ({out.name}).")
+
+
+@main.command(name="claude-setup")
+@click.argument("path", default=".", required=False)
+@click.option("--focl-file", "-f", default=None, help="Path to the .focl file")
+@click.option("--dry-run", is_flag=True, help="Show planned changes without writing")
+def claude_setup(path: str, focl_file: str | None, dry_run: bool) -> None:
+    """Scaffold Claude Code integration (MCP server, freshness hook, skill)."""
+    root = _resolve_root(path)
+    out = Path(focl_file).resolve() if focl_file else _focl_path(root, None)
+    focl_name = out.name
+
+    mcp_path = root / ".mcp.json"
+    settings_path = root / ".claude" / "settings.json"
+    skill_path = root / ".claude" / "skills" / "focl" / "SKILL.md"
+    claude_md = root / "CLAUDE.md"
+
+    actions: list[tuple[str, Path, str]] = [
+        ("CLAUDE.md pointer", claude_md,
+         _upsert_claude_pointer(
+             claude_md.read_text(encoding="utf-8") if claude_md.exists() else None,
+             focl_name)),
+        (".mcp.json (MCP server registration)", mcp_path,
+         json.dumps(_merge_mcp_json(_read_json(mcp_path)), indent=2) + "\n"),
+        (".claude/settings.json (freshness hook)", settings_path,
+         json.dumps(_merge_settings_hook(_read_json(settings_path)), indent=2) + "\n"),
+        (".claude/skills/focl/SKILL.md (skill)", skill_path,
+         _render_skill(focl_name)),
+    ]
+
+    for label, target, content in actions:
+        rel = target.relative_to(root)
+        if dry_run:
+            console.print(f"[cyan]would write[/cyan] {rel} — {label}")
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            console.print(f"[green]wrote[/green] {rel} — {label}")
+
+    if dry_run:
+        console.print("\n[dim]Dry run — no files changed. Re-run without --dry-run to apply.[/dim]")
+    else:
+        console.print(
+            "\n[bold]Claude Code integration ready.[/bold] Restart Claude Code "
+            "to load the MCP server and SessionStart hook."
+        )

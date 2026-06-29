@@ -21,14 +21,17 @@ ruff check focl/                 # lint (CI lints focl/ only, line-length 100)
 The CLI itself (entry point `focl = focl.cli:main`):
 
 ```bash
-focl init [path]     # analyse a codebase and generate <project>.focl  (--force to overwrite)
-focl sync [path]     # full regeneration from scratch
-focl watch [path]    # watch sources and incrementally patch the .focl
-focl stats [path]    # show compression metrics for an existing .focl
-focl plan [path]     # preview the sharding plan WITHOUT calling the API (offline, free)
+focl init [path]      # analyse a codebase and generate <project>.focl  (--force to overwrite)
+focl sync [path]      # full regeneration from scratch
+focl watch [path]     # watch sources and incrementally patch the .focl
+focl stats [path]     # show compression metrics for an existing .focl
+focl plan [path]      # preview the sharding plan WITHOUT calling the API (offline, free)
+focl check [path]     # offline: is the .focl stale vs the sources? (no API)
+focl mcp [path]       # run the MCP server exposing the .focl (needs [mcp] extra)
+focl claude-setup     # scaffold Claude Code integration (CLAUDE.md, .mcp.json, hook, skill)
 ```
 
-Any command that compresses requires an API key — `ANTHROPIC_API_KEY` (default provider) or `OPENROUTER_API_KEY` (with `--provider openrouter`), or `--api-key`. `init`/`sync`/`watch`/`stats` accept `--provider {anthropic,openrouter}`, `--model`, `--base-url`. `focl plan` and the test suite run fully offline.
+Any command that compresses requires an API key — `ANTHROPIC_API_KEY` (default provider) or `OPENROUTER_API_KEY` (with `--provider openrouter`), or `--api-key`. `init`/`sync`/`watch`/`stats` accept `--provider {anthropic,openrouter}`, `--model`, `--base-url`. `init`/`sync` also take `--claude` (write just the `CLAUDE.md` pointer). `focl plan`, `focl check`, `focl claude-setup`, and the test suite run fully offline.
 
 ## Architecture
 
@@ -46,7 +49,12 @@ The pipeline flows in one direction across small single-purpose modules in `focl
 
 6. **`watcher.py`** — `watch()` uses watchdog with a debounced handler that coalesces rapid events. It deliberately ignores `.focl` files (to avoid self-triggered rebuild loops) and reuses the analyzer's ignore sets. On change it calls back into `generator.update()`.
 
-7. **`cli.py`** — Click command group wiring the above together with `rich` for progress/tables. The shared `--provider/--model/--api-key/--base-url` options are applied via the `_llm_options` decorator and turned into an `LLMConfig` by `_build_config`. Note `watch` is defined as `watch_cmd` and registered with `name="watch"` (the name avoids shadowing the imported `watch` function).
+7. **`cli.py`** — Click command group wiring the above together with `rich` for progress/tables. The shared `--provider/--model/--api-key/--base-url` options are applied via the `_llm_options` decorator and turned into an `LLMConfig` by `_build_config`. Also holds the Claude Code scaffolding helpers (`_upsert_claude_pointer`, `_merge_mcp_json`, `_merge_settings_hook`, `_render_skill`) — all pure and unit-tested — plus the `check`, `mcp`, and `claude-setup` commands. Note `watch` is defined as `watch_cmd` and registered with `name="watch"` (the name avoids shadowing the imported `watch` function).
+
+### Claude Code integration layer
+
+- **`index.py`** — parses a generated `.focl` back into `{source_path: block}` by its `# src:` annotations (`parse_focl_blocks`, `module_paths`, `get_module`, `overview`, `header`). Pure/offline; the keystone for the MCP server and future surgical patching in `update()`.
+- **`mcp_server.py`** — `focl mcp` runtime. A thin FastMCP wrapper over `index` exposing tools (`focl_overview`, `focl_list_modules`, `focl_module`) and the `focl://project` resource; re-reads the `.focl` on every call so edits show up live. `mcp` is an optional dep (`[mcp]` extra), imported lazily.
 
 ### Key cross-module conventions
 

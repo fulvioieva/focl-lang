@@ -22,8 +22,35 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `focl validate` — verify `.focl` file structure and primitive usage
 - `focl decompile` — reconstruct source from `.focl` (round-trip proof)
 - Surgical patch in `update()` — patch only blocks affected by changed files
-- File → FOCL block mapping parser (`# src:` annotation index)
+  (now unblocked by `focl/index.py`)
 - Externalise system prompts to `focl/prompts/` as loadable resources
+- Distributable Claude Code plugin (bundle MCP + skill + hook + commands)
+
+---
+
+## [0.3.0] — 2026-06-29
+
+### Added
+- **Claude Code integration** (steps 2–4 of the integration plan).
+  - `focl init --claude` / `focl sync --claude` write a sentinel-delimited
+    pointer block into `CLAUDE.md` (idempotent, updated in place).
+  - **`focl/index.py`** — parses a `.focl` back into `{source_path: block}` by
+    its `# src:` annotations (`parse_focl_blocks`, `module_paths`, `get_module`,
+    `overview`). Keystone for the MCP server and future surgical patching.
+  - **`focl mcp`** — an MCP server (optional `[mcp]` extra) exposing the map as
+    tools (`focl_overview`, `focl_list_modules`, `focl_module`) and a
+    `focl://project` resource; re-reads the file live.
+  - **`focl check`** — offline freshness check comparing source vs `.focl`
+    mtimes (no API call); intended for a `SessionStart` hook.
+  - **`focl claude-setup`** — scaffolds the whole integration: `CLAUDE.md`
+    pointer, `.mcp.json` MCP registration, a `SessionStart` hook running
+    `focl check`, and a Claude Code skill. `--dry-run` previews; merges into
+    existing files idempotently.
+
+### Notes
+- New optional extra `[mcp]` (the `mcp` package) for `focl mcp`.
+- Test suite grows to 77 (added `test_index.py`, `test_mcp_server.py`, and
+  CLI tests for the scaffolding/freshness helpers).
 
 ---
 
