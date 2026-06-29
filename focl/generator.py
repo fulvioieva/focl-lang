@@ -1,26 +1,25 @@
-"""FOCL generator: compresses a codebase into .focl format via Anthropic API.
+"""FOCL generator: compresses a codebase into .focl format via an LLM.
 
 For large codebases, the generator shards the project into chunks that each
 fit within the model's context window, compresses each shard separately,
 and merges the results into a single .focl file.
+
+The actual LLM call is delegated to :mod:`focl.providers`, so the same
+generation logic works against Anthropic or any OpenRouter model.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Callable
 
-import anthropic
-
 from . import __version__
 from .analyzer import ProjectInfo, build_context, wrap_file
+from .providers import LLMConfig, estimate_tokens, generate_text
 from .sharder import (
     DEFAULT_SHARD_BUDGET,
-    MODEL,
     ShardingResult,
     build_shard_context,
-    estimate_tokens,
     shard_project,
 )
 
@@ -74,24 +73,27 @@ def generate(info: ProjectInfo,
              api_key: str | None = None,
              shard_budget: int = DEFAULT_SHARD_BUDGET,
              use_api_counter: bool = False,
-             progress: Callable[[str], None] | None = None) -> str:
-    """Call Anthropic API and return the .focl content.
+             progress: Callable[[str], None] | None = None,
+             config: LLMConfig | None = None) -> str:
+    """Call the configured LLM and return the .focl content.
 
     For small codebases, sends a single request. For large ones, shards
     the project and merges the results.
 
     Args:
         info: ProjectInfo from analyzer.detect()
-        api_key: Anthropic API key (falls back to ANTHROPIC_API_KEY env var)
+        api_key: API key (used when no config is supplied; falls back to the
+            provider's env var)
         shard_budget: Max estimated tokens per shard (default 80K)
-        use_api_counter: Use the Anthropic token counter for exact sizing
+        use_api_counter: Use the provider's exact token counter for sizing
         progress: Optional callback invoked with human-readable status messages
+        config: Provider/model configuration. Defaults to Anthropic.
 
     Returns:
         The complete .focl file content as a string.
     """
-    key = _require_api_key(api_key)
-    client = anthropic.Anthropic(api_key=key)
+    config = config or LLMConfig(api_key=api_key)
+    config.require_api_key()  # fail fast before doing any work
 
     # Decide between single-call and sharded compression based on a quick
     # estimate of the full context.
@@ -100,13 +102,13 @@ def generate(info: ProjectInfo,
 
     if estimated_tokens <= _SINGLE_CALL_THRESHOLD:
         _notify(progress, f"Single-call compression ({estimated_tokens:,} est. tokens)")
-        return _compress_single(client, info, full_context)
+        return _compress_single(config, info, full_context)
 
     # Sharded path
     _notify(progress, f"Codebase is large ({estimated_tokens:,} est. tokens) — sharding")
     result = shard_project(
         info, budget=shard_budget,
-        use_api_counter=use_api_counter, api_key=key,
+        use_api_counter=use_api_counter, config=config,
     )
     _notify(progress, f"Split into {len(result.shards)} shards")
 
@@ -115,13 +117,15 @@ def generate(info: ProjectInfo,
         extra = f" (+{len(result.oversize_files) - 3})" if len(result.oversize_files) > 3 else ""
         _notify(progress, f"Warning: {len(result.oversize_files)} file(s) exceed budget alone: {names}{extra}")
 
-    return _compress_sharded(client, info, result, progress)
+    return _compress_sharded(config, info, result, progress)
 
 
 def update(focl_path: Path, changed_files: list[Path], root: Path,
-           api_key: str | None = None) -> str:
+           api_key: str | None = None,
+           config: LLMConfig | None = None) -> str:
     """Patch an existing .focl file given a list of changed source files."""
-    key = _require_api_key(api_key)
+    config = config or LLMConfig(api_key=api_key)
+    config.require_api_key()
 
     existing_focl = focl_path.read_text(encoding="utf-8")
 
@@ -148,8 +152,7 @@ def update(focl_path: Path, changed_files: list[Path], root: Path,
         f"## Changed files\n{changed_content}"
     )
 
-    client = anthropic.Anthropic(api_key=key)
-    return _invoke(client, user_message)
+    return _invoke(config, user_message)
 
 
 # ---------------------------------------------------------------------------
@@ -157,21 +160,12 @@ def update(focl_path: Path, changed_files: list[Path], root: Path,
 # ---------------------------------------------------------------------------
 
 
-def _require_api_key(api_key: str | None) -> str:
-    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        raise ValueError(
-            "Anthropic API key not found. Set ANTHROPIC_API_KEY or pass --api-key."
-        )
-    return key
-
-
 def _notify(progress: Callable[[str], None] | None, message: str) -> None:
     if progress is not None:
         progress(message)
 
 
-def _compress_single(client: anthropic.Anthropic,
+def _compress_single(config: LLMConfig,
                      info: ProjectInfo,
                      context: str) -> str:
     user_message = (
@@ -183,10 +177,10 @@ def _compress_single(client: anthropic.Anthropic,
         "Apply maximum compression. Output FOCL only.\n\n"
         f"{context}"
     )
-    return _invoke(client, user_message)
+    return _invoke(config, user_message)
 
 
-def _compress_sharded(client: anthropic.Anthropic,
+def _compress_sharded(config: LLMConfig,
                       info: ProjectInfo,
                       result: ShardingResult,
                       progress: Callable[[str], None] | None) -> str:
@@ -211,7 +205,7 @@ def _compress_sharded(client: anthropic.Anthropic,
             file_count=shard.file_count,
         ) + shard_context
 
-        compressed = _invoke(client, user_message)
+        compressed = _invoke(config, user_message)
         compressed_shards.append(
             f"# ── shard {i}/{total}: {shard.label} "
             f"({shard.file_count} files) ──\n{compressed}"
@@ -221,25 +215,11 @@ def _compress_sharded(client: anthropic.Anthropic,
         f"# FOCL file for project: {info.root.name}\n"
         f"# Language: {info.language}{fw_suffix}\n"
         f"# Source files: {len(info.files)} in {total} shards\n"
-        f"# Generated by focl v{__version__}\n"
+        f"# Generated by focl v{__version__} ({config.provider}: {config.model})\n"
     )
     return header + "\n\n" + "\n\n".join(compressed_shards)
 
 
-def _invoke(client: anthropic.Anthropic, user_message: str) -> str:
-    """Invoke the model and return the concatenated text output.
-
-    Uses streaming to tolerate long generations. Extracts only text blocks
-    (thinking blocks, if present, are ignored).
-    """
-    with client.messages.stream(
-        model=MODEL,
-        max_tokens=_MAX_OUTPUT_TOKENS,
-        thinking={"type": "adaptive"},
-        system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_message}],
-    ) as stream:
-        result = stream.get_final_message()
-
-    parts = [block.text for block in result.content if hasattr(block, "text")]
-    return "\n".join(parts).strip()
+def _invoke(config: LLMConfig, user_message: str) -> str:
+    """Invoke the configured model and return its text output."""
+    return generate_text(config, _SYSTEM_PROMPT, user_message, _MAX_OUTPUT_TOKENS)

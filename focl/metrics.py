@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .analyzer import ProjectInfo, build_context
-from .sharder import count_tokens
+from .providers import LLMConfig, count_tokens, estimate_tokens
 
 
 @dataclass
@@ -54,16 +54,18 @@ class CompressionMetrics:
 
 def measure(info: ProjectInfo, focl_content: str,
             api_key: str | None = None,
-            exact: bool = False) -> CompressionMetrics:
+            exact: bool = False,
+            config: LLMConfig | None = None) -> CompressionMetrics:
     """Measure compression for a given codebase and its FOCL output.
 
     Args:
         info: Project info (source files + total bytes)
         focl_content: The generated .focl text
-        api_key: Anthropic API key for exact token counting
-        exact: If True, use the Anthropic API for precise counts. This
-            costs no generation tokens but does add latency and requires
-            a valid API key. If False, use an offline heuristic.
+        api_key: API key for exact token counting (when no config is supplied)
+        exact: If True, use the provider's exact token counter (Anthropic
+            only). It costs no generation tokens but adds latency and needs a
+            valid key. If False, use an offline heuristic.
+        config: Provider/model configuration. Defaults to Anthropic.
 
     Returns:
         CompressionMetrics with both token and byte measurements.
@@ -73,11 +75,10 @@ def measure(info: ProjectInfo, focl_content: str,
     focl_bytes = len(focl_content.encode("utf-8"))
 
     if exact:
-        source_tokens = count_tokens(source_text, api_key=api_key)
-        focl_tokens = count_tokens(focl_content, api_key=api_key)
+        config = config or LLMConfig(api_key=api_key)
+        source_tokens = count_tokens(config, source_text, use_api_counter=True)
+        focl_tokens = count_tokens(config, focl_content, use_api_counter=True)
     else:
-        # Reuse the estimator from sharder so heuristics stay consistent
-        from .sharder import estimate_tokens
         source_tokens = estimate_tokens(source_text)
         focl_tokens = estimate_tokens(focl_content)
 
@@ -93,7 +94,9 @@ def measure(info: ProjectInfo, focl_content: str,
 def measure_from_paths(source_info: ProjectInfo,
                        focl_path: Path,
                        api_key: str | None = None,
-                       exact: bool = False) -> CompressionMetrics:
+                       exact: bool = False,
+                       config: LLMConfig | None = None) -> CompressionMetrics:
     """Convenience wrapper when the .focl file already exists on disk."""
     focl_content = focl_path.read_text(encoding="utf-8")
-    return measure(source_info, focl_content, api_key=api_key, exact=exact)
+    return measure(source_info, focl_content, api_key=api_key, exact=exact,
+                   config=config)

@@ -15,10 +15,31 @@ from . import __version__
 from .analyzer import detect
 from .generator import generate, update
 from .metrics import measure, measure_from_paths
+from .providers import DEFAULT_PROVIDER, PROVIDERS, LLMConfig
 from .sharder import DEFAULT_SHARD_BUDGET
 from .watcher import watch
 
 console = Console()
+
+
+def _llm_options(f):
+    """Attach the shared provider/model/key/base-url options to a command."""
+    f = click.option("--base-url", default=None,
+                     help="Override the provider's API base URL")(f)
+    f = click.option("--api-key", default=None,
+                     help="API key (else <PROVIDER>_API_KEY env var)")(f)
+    f = click.option("--model", default=None,
+                     help="Model id/slug (provider default if unset)")(f)
+    f = click.option("--provider", type=click.Choice(PROVIDERS),
+                     default=DEFAULT_PROVIDER, show_default=True,
+                     help="LLM provider")(f)
+    return f
+
+
+def _build_config(provider: str, model: str | None, api_key: str | None,
+                  base_url: str | None) -> LLMConfig:
+    return LLMConfig(provider=provider, model=model, api_key=api_key,
+                     base_url=base_url)
 
 
 def _resolve_root(path: str | None) -> Path:
@@ -38,10 +59,10 @@ def _focl_path(root: Path, name: str | None) -> Path:
 
 def _print_compression_report(info, focl_content: str,
                                elapsed: float, out_name: str,
-                               api_key: str | None,
+                               config: LLMConfig,
                                exact: bool) -> None:
     """Shared reporting block used by init and sync."""
-    m = measure(info, focl_content, api_key=api_key, exact=exact)
+    m = measure(info, focl_content, config=config, exact=exact)
 
     qualifier = "exact" if m.exact else "estimated"
     console.print(f"\n[bold green]Done[/bold green] — {out_name} written in {elapsed:.1f}s")
@@ -55,7 +76,7 @@ def _print_compression_report(info, focl_content: str,
     )
 
 
-def _generate_and_report(info, out: Path, *, api_key: str | None,
+def _generate_and_report(info, out: Path, *, config: LLMConfig,
                          shard_budget: int, exact_tokens: bool,
                          fail_label: str) -> None:
     """Run generation under a progress spinner, write the .focl, print the report.
@@ -73,7 +94,7 @@ def _generate_and_report(info, out: Path, *, api_key: str | None,
         try:
             focl_content = generate(
                 info,
-                api_key=api_key,
+                config=config,
                 shard_budget=shard_budget,
                 use_api_counter=exact_tokens,
                 progress=on_progress,
@@ -87,7 +108,7 @@ def _generate_and_report(info, out: Path, *, api_key: str | None,
 
     out.write_text(focl_content, encoding="utf-8")
     _print_compression_report(info, focl_content, elapsed, out.name,
-                              api_key=api_key, exact=exact_tokens)
+                              config=config, exact=exact_tokens)
 
 
 @click.group()
@@ -99,17 +120,19 @@ def main() -> None:
 @main.command()
 @click.argument("path", default=".", required=False)
 @click.option("--output", "-o", default=None, help="Output .focl filename (default: <project>.focl)")
-@click.option("--api-key", envvar="ANTHROPIC_API_KEY", default=None, help="Anthropic API key")
+@_llm_options
 @click.option("--force", is_flag=True, help="Overwrite existing .focl file")
 @click.option("--shard-budget", default=DEFAULT_SHARD_BUDGET, show_default=True,
               type=int, help="Max estimated tokens per shard for large codebases")
 @click.option("--exact-tokens", is_flag=True,
-              help="Use Anthropic API for exact token counts (slower, more accurate)")
-def init(path: str, output: str | None, api_key: str | None, force: bool,
+              help="Use the provider's exact token counter (Anthropic only; slower)")
+def init(path: str, output: str | None, provider: str, model: str | None,
+         api_key: str | None, base_url: str | None, force: bool,
          shard_budget: int, exact_tokens: bool) -> None:
     """Analyse a codebase and generate a .focl file."""
     root = _resolve_root(path)
     out = _focl_path(root, output)
+    config = _build_config(provider, model, api_key, base_url)
 
     if out.exists() and not force:
         console.print(f"[yellow]{out.name}[/yellow] already exists. Use --force to overwrite.")
@@ -121,6 +144,7 @@ def init(path: str, output: str | None, api_key: str | None, force: bool,
         f"  Language: [green]{info.language}[/green]"
         + (f" / {info.framework}" if info.framework else "")
     )
+    console.print(f"  Model:    [green]{config.provider}[/green] / {config.model}")
     console.print(f"  Files:    {len(info.files)}")
     console.print(f"  Size:     {info.total_bytes / 1024:.0f} KB")
     if info.skipped_files:
@@ -135,41 +159,46 @@ def init(path: str, output: str | None, api_key: str | None, force: bool,
                 rel = skipped_path
             console.print(f"    • {rel} — {reason}")
 
-    _generate_and_report(info, out, api_key=api_key, shard_budget=shard_budget,
+    _generate_and_report(info, out, config=config, shard_budget=shard_budget,
                          exact_tokens=exact_tokens, fail_label="Generation failed")
 
 
 @main.command()
 @click.argument("path", default=".", required=False)
 @click.option("--focl-file", "-f", default=None, help="Path to existing .focl file")
-@click.option("--api-key", envvar="ANTHROPIC_API_KEY", default=None, help="Anthropic API key")
+@_llm_options
 @click.option("--shard-budget", default=DEFAULT_SHARD_BUDGET, show_default=True,
               type=int, help="Max estimated tokens per shard for large codebases")
 @click.option("--exact-tokens", is_flag=True,
-              help="Use Anthropic API for exact token counts")
-def sync(path: str, focl_file: str | None, api_key: str | None,
+              help="Use the provider's exact token counter (Anthropic only)")
+def sync(path: str, focl_file: str | None, provider: str, model: str | None,
+         api_key: str | None, base_url: str | None,
          shard_budget: int, exact_tokens: bool) -> None:
     """Regenerate the .focl file from scratch (full re-analysis)."""
     root = _resolve_root(path)
     out = Path(focl_file).resolve() if focl_file else _focl_path(root, None)
+    config = _build_config(provider, model, api_key, base_url)
 
     console.print(f"[bold]FOCL[/bold] syncing [cyan]{root}[/cyan]")
+    console.print(f"  Model:  [green]{config.provider}[/green] / {config.model}")
     info = detect(root)
 
-    _generate_and_report(info, out, api_key=api_key, shard_budget=shard_budget,
+    _generate_and_report(info, out, config=config, shard_budget=shard_budget,
                          exact_tokens=exact_tokens, fail_label="Sync failed")
 
 
 @main.command()
 @click.argument("path", default=".", required=False)
 @click.option("--focl-file", "-f", default=None, help="Path to .focl file to keep updated")
-@click.option("--api-key", envvar="ANTHROPIC_API_KEY", default=None, help="Anthropic API key")
+@_llm_options
 @click.option("--debounce", default=3.0, show_default=True,
               help="Seconds to wait after last change before updating")
-def watch_cmd(path: str, focl_file: str | None, api_key: str | None, debounce: float) -> None:
+def watch_cmd(path: str, focl_file: str | None, provider: str, model: str | None,
+              api_key: str | None, base_url: str | None, debounce: float) -> None:
     """Watch for source changes and automatically patch the .focl file."""
     root = _resolve_root(path)
     out = Path(focl_file).resolve() if focl_file else _focl_path(root, None)
+    config = _build_config(provider, model, api_key, base_url)
 
     if not out.exists():
         console.print(f"[red]Error:[/red] {out.name} not found. Run 'focl init' first.")
@@ -186,7 +215,7 @@ def watch_cmd(path: str, focl_file: str | None, api_key: str | None, debounce: f
         console.print(f"[yellow]Changed:[/yellow] {names} — updating .focl...")
         try:
             t0 = time.time()
-            updated = update(out, changed, root, api_key=api_key)
+            updated = update(out, changed, root, config=config)
             out.write_text(updated, encoding="utf-8")
             elapsed = time.time() - t0
             console.print(f"[green]Updated[/green] {out.name} in {elapsed:.1f}s")
@@ -202,14 +231,16 @@ main.add_command(watch_cmd, name="watch")
 @main.command()
 @click.argument("path", default=".", required=False)
 @click.option("--focl-file", "-f", default=None, help="Path to .focl file")
-@click.option("--api-key", envvar="ANTHROPIC_API_KEY", default=None, help="Anthropic API key")
+@_llm_options
 @click.option("--exact-tokens", is_flag=True,
-              help="Use Anthropic API for exact token counts (slower, more accurate)")
-def stats(path: str, focl_file: str | None, api_key: str | None,
+              help="Use the provider's exact token counter (Anthropic only; slower)")
+def stats(path: str, focl_file: str | None, provider: str, model: str | None,
+          api_key: str | None, base_url: str | None,
           exact_tokens: bool) -> None:
     """Show compression statistics for the project."""
     root = _resolve_root(path)
     out = Path(focl_file).resolve() if focl_file else _focl_path(root, None)
+    config = _build_config(provider, model, api_key, base_url)
 
     info = detect(root)
 
@@ -223,7 +254,7 @@ def stats(path: str, focl_file: str | None, api_key: str | None,
     table.add_row("Source size", f"{info.total_bytes / 1024:.0f} KB")
 
     if out.exists():
-        m = measure_from_paths(info, out, api_key=api_key, exact=exact_tokens)
+        m = measure_from_paths(info, out, config=config, exact=exact_tokens)
         qualifier = "exact" if m.exact else "estimated"
         table.add_row("FOCL size", f"{m.focl_bytes / 1024:.0f} KB")
         table.add_row(f"Source tokens ({qualifier})", f"{m.source_tokens:,}")

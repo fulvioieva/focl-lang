@@ -72,6 +72,28 @@ Set your Anthropic API key:
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
+### Choosing a provider / model
+
+By default FOCL uses Anthropic (`claude-opus-4-7`). You can switch the model, or
+route through [OpenRouter](https://openrouter.ai) to use any model it exposes
+(`anthropic/*`, `openai/*`, `google/*`, …):
+
+```bash
+# A different Claude model on Anthropic
+focl init . --model claude-opus-4-8
+
+# OpenRouter (OpenAI-compatible) — requires the optional extra
+pip install -e ".[openrouter]"
+export OPENROUTER_API_KEY=sk-or-...
+focl init . --provider openrouter --model openai/gpt-4o
+```
+
+Flags available on `init`, `sync`, `watch`, and `stats`:
+`--provider {anthropic,openrouter}`, `--model <id/slug>`, `--api-key`, `--base-url`.
+The API key is read from `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` depending on
+the provider. Exact token counting (`--exact-tokens`) is Anthropic-only; other
+providers fall back to the offline estimate.
+
 ## Commands
 
 ### `focl init [path]`

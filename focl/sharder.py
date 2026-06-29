@@ -14,27 +14,19 @@ Strategy:
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import anthropic
-
 from .analyzer import ProjectInfo, wrap_file
-
-# Single source of truth for the Claude model used across the package, both
-# for generation (generator.py) and for token counting below.
-MODEL = "claude-opus-4-7"
+from .providers import LLMConfig, count_tokens, estimate_tokens
 
 # Default budget per shard: conservative to leave room for system prompt,
 # instructions, and model output. Opus 4.7 accepts 1M input tokens, but
 # quality and latency degrade well before that.
 DEFAULT_SHARD_BUDGET = 80_000
 
-# Characters-per-token heuristic used when the tokenizer is unavailable.
-# Source code averages ~3.5 chars/token with the Claude tokenizer; we use
-# 3.0 to stay conservative and avoid underestimation.
-_CHARS_PER_TOKEN = 3.0
+# Backwards-compatible alias: this estimator used to live here.
+_estimate_tokens = estimate_tokens
 
 
 @dataclass
@@ -57,54 +49,27 @@ class ShardingResult:
     oversize_files: list[Path]       # files that alone exceed the budget
 
 
-def count_tokens(text: str, api_key: str | None = None,
-                 model: str = MODEL) -> int:
-    """Count tokens using the Anthropic API when possible, else estimate.
-
-    The API call is cheap (free, does not charge as a generation) but adds
-    latency. Fall back to a character-based heuristic if the call fails
-    or no API key is available.
-    """
-    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        return estimate_tokens(text)
-    try:
-        client = anthropic.Anthropic(api_key=key)
-        result = client.messages.count_tokens(
-            model=model,
-            messages=[{"role": "user", "content": text}],
-        )
-        return int(result.input_tokens)
-    except Exception:
-        return estimate_tokens(text)
-
-
-def estimate_tokens(text: str) -> int:
-    """Fast offline estimate of token count based on character length."""
-    return int(len(text) / _CHARS_PER_TOKEN) + 1
-
-
-# Backwards-compatible alias: this helper used to be private.
-_estimate_tokens = estimate_tokens
-
-
 def shard_project(info: ProjectInfo,
                   budget: int = DEFAULT_SHARD_BUDGET,
                   use_api_counter: bool = False,
-                  api_key: str | None = None) -> ShardingResult:
+                  api_key: str | None = None,
+                  config: LLMConfig | None = None) -> ShardingResult:
     """Split the project files into shards respecting the token budget.
 
     Args:
         info: ProjectInfo from analyzer.detect()
         budget: Max estimated tokens per shard (default 80K)
-        use_api_counter: If True, use the Anthropic count_tokens API for
-            exact counts (slower, requires API key). Otherwise use a
+        use_api_counter: If True, use the provider's exact token counter
+            (Anthropic only; slower, requires a key). Otherwise use a
             character-based estimate (fast, offline).
-        api_key: Anthropic API key (only used when use_api_counter=True)
+        api_key: API key (only used when use_api_counter=True and no config
+            is supplied)
+        config: Provider/model configuration. Defaults to Anthropic.
 
     Returns:
         ShardingResult with a list of shards and diagnostic info.
     """
+    config = config or LLMConfig(api_key=api_key)
     # Group files by top-level sub-directory relative to project root.
     # Files directly at root go into the "root" group.
     groups: dict[str, list[tuple[Path, str, int]]] = {}
@@ -122,10 +87,7 @@ def shard_project(info: ProjectInfo,
         group_key = parts[0] if len(parts) > 1 else "root"
 
         wrapped = wrap_file(rel, content)
-        if use_api_counter:
-            tokens = count_tokens(wrapped, api_key=api_key)
-        else:
-            tokens = estimate_tokens(wrapped)
+        tokens = count_tokens(config, wrapped, use_api_counter=use_api_counter)
 
         total_tokens += tokens
 
