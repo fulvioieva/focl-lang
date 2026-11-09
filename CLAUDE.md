@@ -74,4 +74,4 @@ Tests run fully offline. Most cover the offline machinery directly (analyzer, sh
 
 ## Versioning
 
-The version is duplicated in `focl/__init__.py` (`__version__`) and `pyproject.toml` — keep them in sync when releasing. The generated sharded-file header reads `__version__` and the provider/model used.
+The version is duplicated in `focl/__init__.py` (`__version__`) and `pyproject.toml` — keep them in sync when releasing. A release commit also moves the `[Unreleased]` section of `CHANGELOG.md` (Keep a Changelog + SemVer; its header table defines when to bump PATCH/MINOR/MAJOR — a `.focl` format or CLI break is MAJOR). The plugin has its own independent version in `plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` (keep those two equal to each other, not to the package). The generated sharded-file header reads `__version__` and the provider/model used.
