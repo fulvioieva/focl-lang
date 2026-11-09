@@ -18,6 +18,18 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Default Anthropic model is now Claude Opus 5.5 (`claude-opus-5-5`). Effort
+  is pinned to `high` (Opus 5.5 defaults to `medium`; Opus 4.7 defaulted to
+  `high`), sent via `extra_body` since the pinned SDK has no typed
+  `output_config` on `messages.stream`.
+
+### Fixed
+- OpenRouter default slug is now `anthropic/claude-opus-5.5`; the previous
+  `anthropic/claude-opus-4-7` used dashes, which OpenRouter slugs don't.
+- A safety refusal (`stop_reason: "refusal"`) from the Anthropic provider now
+  raises a clear error instead of writing an empty/partial block into the map.
+
 ### Planned
 - Externalise system prompts to `focl/prompts/` as loadable resources
 

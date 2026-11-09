@@ -45,6 +45,65 @@ class TestConfig:
             providers.estimate_tokens(text))
 
 
+class TestAnthropicDefaults:
+    def test_default_models(self) -> None:
+        assert LLMConfig().model == "claude-opus-5-5"
+        # OpenRouter slugs use dots, not dashes.
+        assert LLMConfig(provider=providers.OPENROUTER).model == "anthropic/claude-opus-5.5"
+
+
+class _FakeStream:
+    def __init__(self, message, seen: dict, kwargs: dict) -> None:
+        self.message, self.seen, self.kwargs = message, seen, kwargs
+
+    def __enter__(self):
+        self.seen.update(self.kwargs)
+        return self
+
+    def __exit__(self, *exc) -> None:
+        return None
+
+    def get_final_message(self):
+        return self.message
+
+
+def _fake_client(message, seen: dict):
+    from types import SimpleNamespace
+    return SimpleNamespace(messages=SimpleNamespace(
+        stream=lambda **kw: _FakeStream(message, seen, kw)))
+
+
+class TestAnthropicGenerate:
+    def _msg(self, stop_reason="end_turn", blocks=None, stop_details=None):
+        from types import SimpleNamespace
+        blocks = blocks if blocks is not None else [
+            SimpleNamespace(type="thinking", thinking=""),
+            SimpleNamespace(type="text", text="  SERVICE A  "),
+        ]
+        return SimpleNamespace(stop_reason=stop_reason, content=blocks,
+                               stop_details=stop_details)
+
+    def test_sends_adaptive_thinking_and_high_effort(self, monkeypatch) -> None:
+        seen: dict = {}
+        monkeypatch.setattr(providers, "_anthropic_client",
+                            lambda cfg, key: _fake_client(self._msg(), seen))
+        out = providers.generate_text(LLMConfig(api_key="k"), "SYS", "USER", 16000)
+        assert out == "SERVICE A"                      # thinking block ignored
+        assert seen["model"] == "claude-opus-5-5"
+        assert seen["thinking"] == {"type": "adaptive"}
+        assert seen["extra_body"] == {"output_config": {"effort": "high"}}
+        assert seen["max_tokens"] == 16000
+
+    def test_refusal_raises_instead_of_empty_map(self, monkeypatch) -> None:
+        from types import SimpleNamespace
+        msg = self._msg(stop_reason="refusal", blocks=[],
+                        stop_details=SimpleNamespace(category="cyber"))
+        monkeypatch.setattr(providers, "_anthropic_client",
+                            lambda cfg, key: _fake_client(msg, {}))
+        with pytest.raises(RuntimeError, match="declined.*cyber"):
+            providers.generate_text(LLMConfig(api_key="k"), "SYS", "USER", 16000)
+
+
 class TestCommand:
     def test_isolating_flags(self, tmp_path: Path) -> None:
         cmd = providers._claude_code_command(

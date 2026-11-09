@@ -36,8 +36,9 @@ DEFAULT_PROVIDER = ANTHROPIC
 
 # Default model per provider. OpenRouter expects ``vendor/model`` slugs.
 DEFAULT_MODELS = {
-    ANTHROPIC: "claude-opus-4-7",
-    OPENROUTER: "anthropic/claude-opus-4-7",
+    ANTHROPIC: "claude-opus-5-5",
+    # OpenRouter slugs use dots in the version ("claude-opus-5.5"), not dashes.
+    OPENROUTER: "anthropic/claude-opus-5.5",
     # Claude Code model aliases always resolve to the latest model of a tier.
     CLAUDE_CODE: "opus",
 }
@@ -149,6 +150,12 @@ def _anthropic_client(config: LLMConfig, key: str):
     return anthropic.Anthropic(**kwargs)
 
 
+# Compression is intelligence-sensitive. Opus 5.5 defaults to effort "medium"
+# (Opus 4.7 defaulted to "high"), so pin it explicitly to keep the depth the
+# grammar prompt was tuned for.
+_ANTHROPIC_EFFORT = "high"
+
+
 def _anthropic_generate(config: LLMConfig, key: str, system: str,
                         user_message: str, max_tokens: int) -> str:
     client = _anthropic_client(config, key)
@@ -158,10 +165,24 @@ def _anthropic_generate(config: LLMConfig, key: str, system: str,
         thinking={"type": "adaptive"},
         system=system,
         messages=[{"role": "user", "content": user_message}],
+        # Via extra_body: the pinned SDK (anthropic>=0.40) predates a typed
+        # `output_config` argument on messages.stream().
+        extra_body={"output_config": {"effort": _ANTHROPIC_EFFORT}},
     ) as stream:
         result = stream.get_final_message()
 
-    parts = [block.text for block in result.content if hasattr(block, "text")]
+    if result.stop_reason == "refusal":
+        # Safety classifiers can decline a request (HTTP 200). Without this the
+        # caller would silently write an empty or partial block into the map.
+        details = getattr(result, "stop_details", None)
+        category = getattr(details, "category", None) if details else None
+        raise RuntimeError(
+            f"{config.model} declined to compress this input"
+            + (f" (category: {category})" if category else "")
+            + ". Retry with another --model or provider."
+        )
+
+    parts = [block.text for block in result.content if getattr(block, "type", None) == "text"]
     return "\n".join(parts).strip()
 
 

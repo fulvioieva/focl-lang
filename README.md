@@ -74,13 +74,15 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 ### Choosing a provider / model
 
-By default FOCL uses Anthropic (`claude-opus-4-7`). You can switch the model, or
-route through [OpenRouter](https://openrouter.ai) to use any model it exposes
-(`anthropic/*`, `openai/*`, `google/*`, …):
+By default FOCL uses Anthropic Claude Opus 5.5 (`claude-opus-5-5`, adaptive
+thinking at effort `high`), or `anthropic/claude-opus-5.5` on OpenRouter — note
+OpenRouter slugs use dots. You can switch the model, or route through
+[OpenRouter](https://openrouter.ai) to use any model it exposes (`anthropic/*`,
+`openai/*`, `google/*`, …):
 
 ```bash
 # A different Claude model on Anthropic
-focl init . --model claude-opus-4-8
+focl init . --model claude-sonnet-5-5
 
 # OpenRouter (OpenAI-compatible) — requires the optional extra
 pip install -e ".[openrouter]"
