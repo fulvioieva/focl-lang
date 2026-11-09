@@ -92,3 +92,11 @@ def test_overview_flags_stale(tmp_path: Path) -> None:
     ov = ms.overview_text(content, root)
     assert "A.java [STALE: changed]" in ov
     assert "focl_search" in ov
+
+
+def test_missing_map_is_explained_not_an_error(tmp_path: Path) -> None:
+    missing = tmp_path / "nope.focl"
+    assert ms.read_map(missing) is None
+    msg = ms.missing_map_text(missing)
+    assert "nope.focl" in msg and "focl init" in msg
+    assert build_server(missing) is not None  # constructing must not fail

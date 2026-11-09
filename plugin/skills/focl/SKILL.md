@@ -1,6 +1,6 @@
 ---
 name: focl
-description: Use the compressed FOCL codebase map for architecture, overview, or "where is X" questions before grepping or reading source files. Refresh it with `focl sync` when stale.
+description: Use the compressed FOCL codebase map for architecture, overview, or "where is X" questions before grepping or reading source files. Refresh stale modules with `focl sync --changed`.
 ---
 
 # FOCL codebase map

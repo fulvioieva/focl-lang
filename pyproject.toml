@@ -58,6 +58,10 @@ focl = "focl.cli:main"
 where = ["."]
 include = ["focl*"]
 
+[tool.setuptools.package-data]
+# Canonical Claude Code skill, copied by `focl claude-setup`.
+focl = ["assets/*.md"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

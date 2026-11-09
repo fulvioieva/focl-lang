@@ -106,6 +106,23 @@ def search_text(content: str, root: Path, query: str,
     return "\n".join(lines)
 
 
+def read_map(focl_path: Path) -> str | None:
+    """The map's text, or None when it doesn't exist (yet)."""
+    try:
+        return focl_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+
+
+def missing_map_text(focl_path: Path) -> str:
+    return (
+        f"No FOCL map ({focl_path.name}) in this project yet, so there is "
+        "nothing to query - read the source files directly. To create one, run "
+        "`focl init` in the project root (it calls an LLM, so ask the user "
+        "first); these tools pick it up immediately."
+    )
+
+
 def build_server(focl_path: Path, root: Path | None = None):
     """Construct (but do not run) the FastMCP server for ``focl_path``.
 
@@ -123,42 +140,50 @@ def build_server(focl_path: Path, root: Path | None = None):
     root = root or focl_path.parent
     server = FastMCP("focl")
 
-    def _read() -> str:
-        return focl_path.read_text(encoding="utf-8")
+    def _read() -> str | None:
+        return read_map(focl_path)
 
     @server.tool()
     def focl_overview() -> str:
         """Return the codebase header and the list of modules (stale ones flagged)."""
-        return overview_text(_read(), root)
+        content = _read()
+        return missing_map_text(focl_path) if content is None else overview_text(content, root)
 
     @server.tool()
     def focl_list_modules() -> list[dict]:
         """Return each module's source path, estimated token size, and freshness
         status (fresh / changed / deleted / unverified)."""
-        return list_modules(_read(), root)
+        content = _read()
+        return [] if content is None else list_modules(content, root)
 
     @server.tool()
     def focl_module(path: str) -> str:
         """Return the compressed FOCL block for a single source file. Accepts a
         full path or a unique suffix (e.g. 'UserService.java')."""
-        return module_text(_read(), root, path)
+        content = _read()
+        return missing_map_text(focl_path) if content is None else module_text(content, root, path)
 
     @server.tool()
     def focl_modules(paths: list[str]) -> str:
         """Return the compressed FOCL blocks for several source files at once."""
-        return modules_text(_read(), root, paths)
+        content = _read()
+        return (missing_map_text(focl_path) if content is None
+                else modules_text(content, root, paths))
 
     @server.tool()
     def focl_search(query: str) -> str:
         """Find where something happens: case-insensitive substring search over
         the compressed map, returning matching lines grouped by source file.
         Cheaper than grepping the source. Matches module paths too."""
-        return search_text(_read(), root, query)
+        content = _read()
+        return (missing_map_text(focl_path) if content is None
+                else search_text(content, root, query))
 
     @server.resource("focl://project")
     def focl_resource() -> str:
         """The full .focl file."""
-        return _read()
+        content = _read()
+        return missing_map_text(focl_path) if content is None else content
 
     return server
 

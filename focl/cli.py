@@ -6,6 +6,7 @@ import copy
 import json
 import sys
 import time
+from importlib import resources
 from pathlib import Path
 
 import click
@@ -138,42 +139,93 @@ def _merge_mcp_json(existing: dict | None) -> dict:
     return data
 
 
+# The SessionStart hook command — shared verbatim with plugin/hooks/hooks.json
+# (a test keeps them identical). `--hook` stays silent in projects without a
+# map; the `||` fallback (valid in bash, cmd and PowerShell 7) turns a missing
+# CLI into a hint on stdout instead of a hook error on every session.
+_HOOK_COMMAND = (
+    "focl check --hook || echo \"FOCL: 'focl check' failed - is the focl CLI "
+    "installed? Run: pip install 'focl[mcp]'\""
+)
+
+
+def _is_focl_hook(command: str) -> bool:
+    return "focl check" in command
+
+
 def _merge_settings_hook(existing: dict | None) -> dict:
-    """Add a SessionStart hook running ``focl check`` (offline freshness)."""
+    """Add (or upgrade in place) the SessionStart hook running ``focl check``."""
     data = copy.deepcopy(existing) if existing else {}
     hooks = data.setdefault("hooks", {})
     session_start = hooks.setdefault("SessionStart", [])
-    already = any(
-        "focl check" in h.get("command", "")
-        for entry in session_start
-        for h in entry.get("hooks", [])
-    )
-    if not already:
-        session_start.append({"hooks": [{"type": "command", "command": "focl check"}]})
+    found = False
+    for entry in session_start:
+        for h in entry.get("hooks", []):
+            if _is_focl_hook(h.get("command", "")):
+                h["command"] = _HOOK_COMMAND
+                found = True
+    if not found:
+        session_start.append({"hooks": [{"type": "command", "command": _HOOK_COMMAND}]})
     return data
 
 
-def _render_skill(focl_name: str) -> str:
-    """A Claude Code skill teaching when to consult the FOCL map."""
-    return (
-        "---\n"
-        "name: focl\n"
-        "description: Use the compressed FOCL codebase map for architecture, "
-        "overview, or \"where is X\" questions before grepping or reading source.\n"
-        "---\n\n"
-        "# FOCL codebase map\n\n"
-        f"A token-compressed map of this codebase is in `{focl_name}` "
-        "(~70–80% smaller than the source).\n\n"
-        "When the question is about architecture, structure, data flow, or "
-        f"\"where does X happen\", read `{focl_name}` first — or, if the `focl` "
-        "MCP server is connected, call `focl_overview`, use `focl_search(query)` "
-        "to locate things, then `focl_module(path)` for the relevant file. Only "
-        "drop to the actual source files for line-level changes or details the "
-        "map doesn't capture.\n\n"
-        "A block marked `[STALE]` (or a module the session-start `focl check` "
-        "lists as changed) no longer matches its source: read the real file for "
-        "it. Refresh just the stale modules with `focl sync --changed`.\n"
-    )
+def _render_skill() -> str:
+    """The Claude Code skill teaching when to consult the FOCL map.
+
+    Single source of truth: ``focl/assets/SKILL.md``, shipped in the package.
+    ``plugin/skills/focl/SKILL.md`` must be an identical copy (enforced by a
+    test), so the plugin and ``focl claude-setup`` can't drift apart.
+    """
+    return resources.files("focl").joinpath("assets/SKILL.md").read_text(encoding="utf-8")
+
+
+def _enabled_focl_plugin(root: Path, home: Path | None = None) -> Path | None:
+    """The settings file that enables the ``focl`` Claude Code plugin, if any.
+
+    Looks at ``enabledPlugins`` (keys ``<plugin>@<marketplace>``) in the
+    project's ``.claude/settings.local.json`` / ``settings.json`` and the
+    user's ``~/.claude/settings.json``.
+    """
+    home = home if home is not None else Path.home()
+    candidates = [
+        root / ".claude" / "settings.local.json",
+        root / ".claude" / "settings.json",
+        home / ".claude" / "settings.json",
+    ]
+    for path in candidates:
+        data = _read_json_quiet(path)
+        enabled = data.get("enabledPlugins") if data else None
+        if isinstance(enabled, dict) and any(
+            key.split("@", 1)[0] == "focl" and on for key, on in enabled.items()
+        ):
+            return path
+    return None
+
+
+def _standalone_leftovers(root: Path) -> list[str]:
+    """Standalone integration files that would duplicate the plugin."""
+    found: list[str] = []
+    mcp = _read_json_quiet(root / ".mcp.json")
+    if mcp and "focl" in mcp.get("mcpServers", {}):
+        found.append(".mcp.json (focl MCP server)")
+    settings = _read_json_quiet(root / ".claude" / "settings.json")
+    if settings and any(
+        _is_focl_hook(h.get("command", ""))
+        for entry in settings.get("hooks", {}).get("SessionStart", [])
+        for h in entry.get("hooks", [])
+    ):
+        found.append(".claude/settings.json (focl check hook)")
+    if (root / ".claude" / "skills" / "focl" / "SKILL.md").exists():
+        found.append(".claude/skills/focl/SKILL.md")
+    return found
+
+
+def _read_json_quiet(path: Path) -> dict | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _read_json(path: Path) -> dict | None:
@@ -546,13 +598,19 @@ main.add_command(plan)
 @click.argument("path", default=".", required=False)
 @click.option("--focl-file", "-f", default=None, help="Path to the .focl file to serve")
 def mcp(path: str, focl_file: str | None) -> None:
-    """Run an MCP server exposing the .focl map (for Claude Code, etc.)."""
+    """Run an MCP server exposing the .focl map (for Claude Code, etc.).
+
+    Starts even when the map doesn't exist yet: the plugin registers this
+    server in every project, and failing would show a broken server in each
+    one. Tools then explain how to create the map, and pick it up as soon as
+    `focl init` writes it (the file is re-read on every call).
+    """
     root = _resolve_root(path)
     out = Path(focl_file).resolve() if focl_file else _focl_path(root, None)
     if not out.exists():
         # Print to stderr — stdout is the MCP (JSON-RPC) channel.
-        click.echo(f"Error: {out.name} not found. Run 'focl init' first.", err=True)
-        sys.exit(1)
+        click.echo(f"Warning: {out.name} not found yet; run 'focl init' to create it.",
+                   err=True)
     try:
         mcp_serve(out, root)
     except RuntimeError as e:
@@ -596,17 +654,25 @@ def validate(path: str, focl_file: str | None, strict: bool) -> None:
 @main.command()
 @click.argument("path", default=".", required=False)
 @click.option("--focl-file", "-f", default=None, help="Path to the .focl file")
-def check(path: str, focl_file: str | None) -> None:
+@click.option("--hook", is_flag=True,
+              help="Hook mode: print nothing when the project has no .focl map")
+def check(path: str, focl_file: str | None, hook: bool) -> None:
     """Report whether the .focl map is up to date with the sources (offline).
 
     Maps whose `# src:` lines carry `@h:` content hashes (stamped by the
     generator) get an exact per-module answer: this
     lists exactly which modules are stale. Older maps fall back to comparing
     modification times.
+
+    `--hook` is for the SessionStart hook: the plugin is enabled per user, so
+    in projects that don't use FOCL it must stay silent rather than nudge
+    Claude to run `focl init` every session.
     """
     root = _resolve_root(path)
     out = Path(focl_file).resolve() if focl_file else _focl_path(root, None)
     if not out.exists():
+        if hook:
+            return
         console.print(
             f"[yellow]FOCL map missing[/yellow] -> run `focl init` to create {out.name}."
         )
@@ -743,8 +809,15 @@ def _safe_join(base: Path, rel: str) -> Path | None:
 @click.argument("path", default=".", required=False)
 @click.option("--focl-file", "-f", default=None, help="Path to the .focl file")
 @click.option("--dry-run", is_flag=True, help="Show planned changes without writing")
-def claude_setup(path: str, focl_file: str | None, dry_run: bool) -> None:
-    """Scaffold Claude Code integration (MCP server, freshness hook, skill)."""
+@click.option("--standalone", is_flag=True,
+              help="Write the MCP/hook/skill files even if the focl plugin is enabled")
+def claude_setup(path: str, focl_file: str | None, dry_run: bool, standalone: bool) -> None:
+    """Scaffold Claude Code integration (MCP server, freshness hook, skill).
+
+    If the `focl` Claude Code plugin is already enabled, only the CLAUDE.md
+    pointer is written — the plugin provides the rest, and writing it again
+    would register the MCP server and run the hook twice.
+    """
     root = _resolve_root(path)
     out = Path(focl_file).resolve() if focl_file else _focl_path(root, None)
     focl_name = out.name
@@ -759,13 +832,31 @@ def claude_setup(path: str, focl_file: str | None, dry_run: bool) -> None:
          _upsert_claude_pointer(
              claude_md.read_text(encoding="utf-8") if claude_md.exists() else None,
              focl_name)),
-        (".mcp.json (MCP server registration)", mcp_path,
-         json.dumps(_merge_mcp_json(_read_json(mcp_path)), indent=2) + "\n"),
-        (".claude/settings.json (freshness hook)", settings_path,
-         json.dumps(_merge_settings_hook(_read_json(settings_path)), indent=2) + "\n"),
-        (".claude/skills/focl/SKILL.md (skill)", skill_path,
-         _render_skill(focl_name)),
     ]
+
+    plugin_settings = None if standalone else _enabled_focl_plugin(root)
+    if plugin_settings is not None:
+        console.print(
+            f"[cyan]focl plugin is enabled[/cyan] ({plugin_settings}) -> it already "
+            "provides the MCP server, hook and skill; writing only the CLAUDE.md "
+            "pointer. Use --standalone to write them anyway."
+        )
+        leftovers = _standalone_leftovers(root)
+        if leftovers:
+            console.print(
+                "  [yellow]Warning:[/yellow] these standalone files duplicate the "
+                "plugin (double MCP server / hook) - consider removing them:"
+            )
+            for item in leftovers:
+                console.print(f"    {item}", markup=False, highlight=False)
+    else:
+        actions += [
+            (".mcp.json (MCP server registration)", mcp_path,
+             json.dumps(_merge_mcp_json(_read_json(mcp_path)), indent=2) + "\n"),
+            (".claude/settings.json (freshness hook)", settings_path,
+             json.dumps(_merge_settings_hook(_read_json(settings_path)), indent=2) + "\n"),
+            (".claude/skills/focl/SKILL.md (skill)", skill_path, _render_skill()),
+        ]
 
     for label, target, content in actions:
         rel = target.relative_to(root)
@@ -778,7 +869,7 @@ def claude_setup(path: str, focl_file: str | None, dry_run: bool) -> None:
 
     if dry_run:
         console.print("\n[dim]Dry run — no files changed. Re-run without --dry-run to apply.[/dim]")
-    else:
+    elif plugin_settings is None:
         console.print(
             "\n[bold]Claude Code integration ready.[/bold] Restart Claude Code "
             "to load the MCP server and SessionStart hook."

@@ -36,6 +36,22 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   silently doing a costly full run) on maps without per-module hashes.
   `focl check` and the plugin's `/focl-sync` command now point to it by default.
 
+### Changed
+- **Claude Code integration hardening.**
+  - Single source for the skill: `focl/assets/SKILL.md` (package data) is what
+    `claude-setup` writes; `plugin/skills/focl/SKILL.md` must be an identical
+    copy, and a test fails on drift. Same for the hook command
+    (`cli._HOOK_COMMAND` vs `plugin/hooks/hooks.json`).
+  - `focl claude-setup` detects an enabled `focl` plugin (`enabledPlugins` in
+    user/project settings) and writes only the `CLAUDE.md` pointer, warning
+    about standalone files that would duplicate it; `--standalone` overrides.
+    Re-running upgrades an old `focl check` hook in place.
+  - The SessionStart hook is now `focl check --hook || echo <install hint>`:
+    silent in projects without a map, and a hint instead of a hook error when
+    the CLI is missing (verified in bash, cmd and PowerShell).
+  - `focl mcp` starts even without a `.focl` (warning on stderr); its tools
+    say there's no map yet and pick it up once `focl init` creates it.
+
 ### Planned
 - Externalise system prompts to `focl/prompts/` as loadable resources
 

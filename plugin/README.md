@@ -10,7 +10,14 @@ map instead of the raw source, directly inside Claude Code.
 | **MCP server** (`focl`) | Tools `focl_overview`, `focl_list_modules`, `focl_module(path)`, `focl_modules(paths)`, `focl_search(query)` and the `focl://project` resource — pull the *compressed* representation on demand; modules whose source changed are flagged `[STALE]`. |
 | **Skill** (`focl`) | Tells Claude to consult the map for architecture/overview questions before reading source. |
 | **Commands** | `/focl:focl-sync` (regenerate the map), `/focl:focl-decompile` (round-trip back to source). |
-| **Hook** | `SessionStart` runs `focl check` and lists which modules are stale. |
+| **Hook** | `SessionStart` runs `focl check --hook` and lists which modules are stale (silent in projects without a map). |
+
+The plugin is safe to enable globally: in projects with no `.focl` the hook stays
+silent and the MCP server starts anyway, answering that there's no map yet.
+
+Don't combine it with `focl claude-setup` in the same project — that would
+register the MCP server and the hook twice. `claude-setup` detects the enabled
+plugin and then writes only the `CLAUDE.md` pointer.
 
 ## Prerequisites
 

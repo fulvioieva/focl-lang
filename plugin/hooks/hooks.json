@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "focl check"
+            "command": "focl check --hook || echo \"FOCL: 'focl check' failed - is the focl CLI installed? Run: pip install 'focl[mcp]'\""
           }
         ]
       }

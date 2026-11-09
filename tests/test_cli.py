@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -12,11 +13,24 @@ from click.testing import CliRunner
 from focl.cli import (
     _CLAUDE_END,
     _CLAUDE_START,
+    _HOOK_COMMAND,
+    _enabled_focl_plugin,
     _merge_mcp_json,
     _merge_settings_hook,
+    _render_skill,
     _upsert_claude_pointer,
     main,
 )
+
+_REPO = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path_factory, monkeypatch) -> Path:
+    """Keep the real ~/.claude/settings.json (enabled plugins) out of the tests."""
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setattr(Path, "home", lambda: home)
+    return home
 
 
 class TestCliBasics:
@@ -211,10 +225,114 @@ class TestClaudeSetup:
 
 
 class TestMcpCommand:
-    def test_errors_without_focl_file(self, tmp_java_project: Path) -> None:
-        runner = CliRunner()
-        result = runner.invoke(main, ["mcp", str(tmp_java_project)])
-        assert result.exit_code != 0
+    def test_starts_without_focl_file(self, tmp_java_project: Path, monkeypatch) -> None:
+        # The plugin registers the server in every project: a missing map must
+        # not make it fail, only warn on stderr (stdout is the JSON-RPC channel).
+        import focl.cli as cli_mod
+        served: list[Path] = []
+        monkeypatch.setattr(cli_mod, "mcp_serve", lambda out, root: served.append(out))
+        result = CliRunner().invoke(main, ["mcp", str(tmp_java_project)])
+        assert result.exit_code == 0
+        assert len(served) == 1
+        assert "not found yet" in result.stderr
+
+
+class TestHookAndSkillSingleSource:
+    """The plugin and `claude-setup` must ship the same hook and skill."""
+
+    def test_plugin_hook_matches_claude_setup(self) -> None:
+        hooks = json.loads((_REPO / "plugin" / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        commands = [h["command"] for e in hooks["hooks"]["SessionStart"] for h in e["hooks"]]
+        assert commands == [_HOOK_COMMAND]
+
+    def test_plugin_skill_matches_package_asset(self) -> None:
+        plugin_skill = (_REPO / "plugin" / "skills" / "focl" / "SKILL.md").read_text(
+            encoding="utf-8")
+        assert plugin_skill == _render_skill(), (
+            "plugin/skills/focl/SKILL.md drifted from focl/assets/SKILL.md - "
+            "edit the asset and copy it over"
+        )
+
+    def test_hook_command_is_hook_mode_with_fallback(self) -> None:
+        assert _HOOK_COMMAND.startswith("focl check --hook || echo ")
+
+    def test_legacy_hook_upgraded_in_place(self) -> None:
+        existing = {"hooks": {"SessionStart": [
+            {"hooks": [{"type": "command", "command": "focl check"}]}
+        ]}}
+        out = _merge_settings_hook(existing)
+        commands = [h["command"] for e in out["hooks"]["SessionStart"] for h in e["hooks"]]
+        assert commands == [_HOOK_COMMAND]
+
+
+class TestCheckHookMode:
+    def test_silent_without_map(self, tmp_java_project: Path) -> None:
+        result = CliRunner().invoke(main, ["check", str(tmp_java_project), "--hook"])
+        assert result.exit_code == 0
+        assert result.output == ""
+
+    def test_reports_with_map(self, tmp_java_project: Path) -> None:
+        focl = tmp_java_project / (tmp_java_project.name + ".focl")
+        focl.write_text("SERVICE X\n", encoding="utf-8")
+        result = CliRunner().invoke(main, ["check", str(tmp_java_project), "--hook"])
+        assert "up to date" in result.output.lower()
+
+
+class TestPluginAwareSetup:
+    def _enable(self, settings: Path, value: bool = True) -> None:
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(json.dumps({"enabledPlugins": {"focl@focl-lang": value}}),
+                            encoding="utf-8")
+
+    def test_detects_user_level_plugin(self, tmp_java_project: Path,
+                                       _isolated_home: Path) -> None:
+        self._enable(_isolated_home / ".claude" / "settings.json")
+        assert _enabled_focl_plugin(tmp_java_project) == (
+            _isolated_home / ".claude" / "settings.json")
+
+    def test_detects_project_local_plugin(self, tmp_java_project: Path) -> None:
+        self._enable(tmp_java_project / ".claude" / "settings.local.json")
+        assert _enabled_focl_plugin(tmp_java_project) is not None
+
+    def test_disabled_or_other_plugins_ignored(self, tmp_java_project: Path,
+                                               _isolated_home: Path) -> None:
+        self._enable(_isolated_home / ".claude" / "settings.json", value=False)
+        assert _enabled_focl_plugin(tmp_java_project) is None
+        (_isolated_home / ".claude" / "settings.json").write_text(
+            json.dumps({"enabledPlugins": {"foclx@m": True}}), encoding="utf-8")
+        assert _enabled_focl_plugin(tmp_java_project) is None
+
+    def test_setup_writes_only_pointer_when_plugin_enabled(
+        self, tmp_java_project: Path, _isolated_home: Path
+    ) -> None:
+        self._enable(_isolated_home / ".claude" / "settings.json")
+        result = CliRunner().invoke(main, ["claude-setup", str(tmp_java_project)])
+        assert result.exit_code == 0
+        assert "plugin is enabled" in result.output
+        assert (tmp_java_project / "CLAUDE.md").exists()
+        assert not (tmp_java_project / ".mcp.json").exists()
+        assert not (tmp_java_project / ".claude" / "skills").exists()
+
+    def test_warns_about_duplicate_standalone_files(
+        self, tmp_java_project: Path, _isolated_home: Path
+    ) -> None:
+        CliRunner().invoke(main, ["claude-setup", str(tmp_java_project)])  # standalone
+        self._enable(_isolated_home / ".claude" / "settings.json")
+        result = CliRunner().invoke(main, ["claude-setup", str(tmp_java_project)])
+        flat = " ".join(result.output.split())
+        assert "duplicate the plugin" in flat
+        assert ".mcp.json (focl MCP server)" in flat
+        assert ".claude/settings.json (focl check hook)" in flat
+
+    def test_standalone_flag_overrides(self, tmp_java_project: Path,
+                                       _isolated_home: Path) -> None:
+        self._enable(_isolated_home / ".claude" / "settings.json")
+        result = CliRunner().invoke(main, ["claude-setup", str(tmp_java_project),
+                                           "--standalone"])
+        assert result.exit_code == 0
+        assert (tmp_java_project / ".mcp.json").exists()
+        skill = tmp_java_project / ".claude" / "skills" / "focl" / "SKILL.md"
+        assert skill.read_text(encoding="utf-8") == _render_skill()
 
 
 class TestCheckPerModule:

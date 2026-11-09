@@ -194,6 +194,17 @@ This writes (merging into anything that already exists):
 
 Use `--dry-run` to preview. Then restart Claude Code.
 
+Use **either** the plugin **or** `claude-setup`, not both: together they would
+register the MCP server and run the hook twice. If the `focl` plugin is enabled
+(user or project `enabledPlugins`), `claude-setup` writes only the `CLAUDE.md`
+pointer and warns about any standalone files left over from an earlier run
+(`--standalone` forces the full scaffolding anyway).
+
+Both are safe to leave on in projects that don't use FOCL: the hook
+(`focl check --hook`) prints nothing when there's no map — and a one-line hint
+instead of an error if the `focl` CLI isn't installed — and `focl mcp` starts
+without a map, telling Claude to read the sources (or `focl init`).
+
 The individual pieces:
 
 ### `focl mcp [path]`
