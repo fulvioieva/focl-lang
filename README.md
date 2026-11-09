@@ -119,6 +119,17 @@ Full re-generation of the `.focl` file from scratch.
 focl sync .
 ```
 
+With `--changed` it regenerates **only the stale modules** — sources that
+changed, were deleted, or are new since the map was written (per the `@h:`
+hashes, see `focl check`) — one model call per changed file, leaving every
+other block byte-for-byte untouched. `--dry-run` lists them without calling the
+API. Maps generated before hashes existed need one full `focl sync` first.
+
+```bash
+focl sync . --changed --dry-run   # preview, offline
+focl sync . --changed             # patch just those modules
+```
+
 ### `focl stats [path]`
 Show compression statistics.
 

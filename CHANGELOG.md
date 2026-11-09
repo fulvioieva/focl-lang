@@ -30,6 +30,11 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `focl_modules(paths)` (batch fetch); `focl_list_modules` now returns token
   size and freshness per module; `focl_module` / `focl_overview` /
   `focl_search` flag stale modules with `[STALE]`.
+- **`focl sync --changed`** — incremental sync: regenerates only the stale
+  modules (changed / new; deleted ones are dropped) via surgical `update()`,
+  one model call per file. `--dry-run` previews offline. Refuses (rather than
+  silently doing a costly full run) on maps without per-module hashes.
+  `focl check` and the plugin's `/focl-sync` command now point to it by default.
 
 ### Planned
 - Externalise system prompts to `focl/prompts/` as loadable resources

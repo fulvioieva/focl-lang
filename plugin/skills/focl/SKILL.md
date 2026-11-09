@@ -29,11 +29,14 @@ map doesn't capture (exact formatting, comments, generated code).
 ## Keeping it fresh
 
 The `SessionStart` hook runs `focl check` and lists exactly which modules are stale.
-When it is — or after significant edits — regenerate it:
+To refresh just those (one model call per changed file, the rest untouched):
 
 ```bash
-focl sync
+focl sync --changed            # add --dry-run to preview, no API call
 ```
+
+A full `focl sync` regenerates the whole map — use it only when asked, or when
+`--changed` reports the map has no per-module hashes.
 
 ## Requirements
 

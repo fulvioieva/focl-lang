@@ -172,7 +172,7 @@ def _render_skill(focl_name: str) -> str:
         "map doesn't capture.\n\n"
         "A block marked `[STALE]` (or a module the session-start `focl check` "
         "lists as changed) no longer matches its source: read the real file for "
-        "it. Regenerate the map with `focl sync`.\n"
+        "it. Refresh just the stale modules with `focl sync --changed`.\n"
     )
 
 
@@ -309,24 +309,107 @@ def init(path: str, output: str | None, provider: str, model: str | None,
               help="Use the provider's exact token counter (Anthropic only)")
 @click.option("--claude", "claude_md", is_flag=True,
               help="Add a pointer to the .focl file in CLAUDE.md for Claude Code")
+@click.option("--changed", is_flag=True,
+              help="Regenerate only stale modules (changed/deleted/new), not the whole map")
+@click.option("--dry-run", is_flag=True,
+              help="With --changed: list what would be regenerated, without calling the API")
 def sync(path: str, focl_file: str | None, provider: str, model: str | None,
          api_key: str | None, base_url: str | None,
-         shard_budget: int, exact_tokens: bool, claude_md: bool) -> None:
-    """Regenerate the .focl file from scratch (full re-analysis)."""
+         shard_budget: int, exact_tokens: bool, claude_md: bool,
+         changed: bool, dry_run: bool) -> None:
+    """Regenerate the .focl file (from scratch, or only stale modules with --changed)."""
     root = _resolve_root(path)
     out = Path(focl_file).resolve() if focl_file else _focl_path(root, None)
     config = _build_config(provider, model, api_key, base_url)
 
+    if dry_run and not changed:
+        console.print("[red]Error:[/red] --dry-run only applies together with --changed.")
+        sys.exit(2)
+
+    if changed:
+        _sync_changed(root, out, config, dry_run)
+    else:
+        _sync_full(root, out, config, shard_budget, exact_tokens)
+
+    if claude_md and not dry_run:
+        _write_claude_pointer(root, out.name)
+        console.print(f"  [green]CLAUDE.md[/green] updated -> points Claude Code at {out.name}")
+
+
+def _sync_changed(root: Path, out: Path, config: LLMConfig, dry_run: bool) -> None:
+    """Incremental sync: regenerate only the modules whose stamps are stale."""
+    if not out.exists():
+        console.print(f"[red]Error:[/red] {out.name} not found. Run `focl init` first.")
+        sys.exit(1)
+
+    info = detect(root)
+    content = out.read_text(encoding="utf-8")
+    report = freshness.check(content, root, info.files,
+                             focl_mtime=out.stat().st_mtime, exclude=out)
+
+    if not report.tracked:
+        console.print(
+            f"[red]Error:[/red] {out.name} has no per-module hashes, so stale "
+            "modules can't be identified. Run a full `focl sync` once; after "
+            "that `--changed` works."
+        )
+        sys.exit(1)
+
+    if not report.stale:
+        console.print(
+            f"[green]Nothing to do[/green] -> all {report.fresh} modules in "
+            f"{out.name} are up to date."
+        )
+        return
+
+    rows = ([("changed", p) for p in report.changed]
+            + [("deleted", p) for p in report.deleted]
+            + [("new", p) for p in report.added])
+    verb = "Would update" if dry_run else "Updating"
+    console.print(
+        f"[bold]FOCL[/bold] {verb} {len(rows)} of "
+        f"{len(rows) + report.fresh} modules in [cyan]{out.name}[/cyan]"
+    )
+    for label, p in rows:
+        console.print(f"  {label:<8}{p}", markup=False, highlight=False)
+    if dry_run:
+        console.print(
+            f"\n[dim]Dry run -> {len(report.changed) + len(report.added)} model "
+            "call(s) needed, nothing written.[/dim]"
+        )
+        return
+
+    console.print(f"  Model:  [green]{config.provider}[/green] / {config.model}")
+    files = [root / p.replace("\\", "/") for p in report.stale_paths]
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+                  console=console) as progress:
+        task = progress.add_task("Starting...", total=None)
+        t0 = time.time()
+        try:
+            updated = update(out, files, root, config=config,
+                             progress=lambda m: progress.update(task, description=m))
+        except Exception as e:
+            progress.update(task, description="[red]Sync failed[/red]")
+            console.print(f"\n[red]Error:[/red] {e}")
+            sys.exit(1)
+        progress.update(task, description="[green]Done[/green]", completed=True)
+
+    out.write_text(updated, encoding="utf-8")
+    console.print(
+        f"\n[bold green]Done[/bold green] -> {out.name} patched in "
+        f"{time.time() - t0:.1f}s ({len(report.changed) + len(report.added)} "
+        f"regenerated, {len(report.deleted)} dropped, {report.fresh} untouched)"
+    )
+
+
+def _sync_full(root: Path, out: Path, config: LLMConfig,
+               shard_budget: int, exact_tokens: bool) -> None:
     console.print(f"[bold]FOCL[/bold] syncing [cyan]{root}[/cyan]")
     console.print(f"  Model:  [green]{config.provider}[/green] / {config.model}")
     info = detect(root)
 
     _generate_and_report(info, out, config=config, shard_budget=shard_budget,
                          exact_tokens=exact_tokens, fail_label="Sync failed")
-
-    if claude_md:
-        _write_claude_pointer(root, out.name)
-        console.print(f"  [green]CLAUDE.md[/green] updated -> points Claude Code at {out.name}")
 
 
 @main.command()
@@ -559,7 +642,7 @@ def check(path: str, focl_file: str | None) -> None:
         console.print(f"  ... and {len(rows) - _CHECK_LIST_LIMIT} more")
     console.print(
         "For these modules read the source files, not the map. "
-        "Run `focl sync` to refresh it."
+        "Run `focl sync --changed` to regenerate just these."
     )
 
 

@@ -124,7 +124,8 @@ def generate(info: ProjectInfo,
 
 def update(focl_path: Path, changed_files: list[Path], root: Path,
            api_key: str | None = None,
-           config: LLMConfig | None = None) -> str:
+           config: LLMConfig | None = None,
+           progress: Callable[[str], None] | None = None) -> str:
     """Patch an existing .focl file given a list of changed source files.
 
     Surgical by default: each changed file's FOCL block (located by its
@@ -145,11 +146,13 @@ def update(focl_path: Path, changed_files: list[Path], root: Path,
 
     replacements: dict[str, str] = {}
     deletions: list[str] = []
-    for f in changed_files:
+    total = len(changed_files)
+    for i, f in enumerate(changed_files, start=1):
         rel = _rel_path(f, root)
         if not f.exists():
             deletions.append(rel)
             continue
+        _notify(progress, f"[{i}/{total}] {rel}")
         content = f.read_text(encoding="utf-8", errors="replace")
         block = _compress_file_block(config, rel, content)
         # Stamp only what we regenerated: untouched blocks keep their own
