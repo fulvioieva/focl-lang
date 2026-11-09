@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from . import __version__, index
+from . import __version__, freshness, index
 from .analyzer import ProjectInfo, build_context, wrap_file
 from .providers import LLMConfig, estimate_tokens, generate_text
 from .sharder import (
@@ -102,7 +102,9 @@ def generate(info: ProjectInfo,
 
     if estimated_tokens <= _SINGLE_CALL_THRESHOLD:
         _notify(progress, f"Single-call compression ({estimated_tokens:,} est. tokens)")
-        return _compress_single(config, info, full_context)
+        # Every block was just generated from the current sources: stamp them
+        # all so `focl check` / the MCP server can track per-module freshness.
+        return freshness.stamp(_compress_single(config, info, full_context), info.root)
 
     # Sharded path
     _notify(progress, f"Codebase is large ({estimated_tokens:,} est. tokens) — sharding")
@@ -117,7 +119,7 @@ def generate(info: ProjectInfo,
         extra = f" (+{len(result.oversize_files) - 3})" if len(result.oversize_files) > 3 else ""
         _notify(progress, f"Warning: {len(result.oversize_files)} file(s) exceed budget alone: {names}{extra}")
 
-    return _compress_sharded(config, info, result, progress)
+    return freshness.stamp(_compress_sharded(config, info, result, progress), info.root)
 
 
 def update(focl_path: Path, changed_files: list[Path], root: Path,
@@ -149,7 +151,10 @@ def update(focl_path: Path, changed_files: list[Path], root: Path,
             deletions.append(rel)
             continue
         content = f.read_text(encoding="utf-8", errors="replace")
-        replacements[rel] = _compress_file_block(config, rel, content)
+        block = _compress_file_block(config, rel, content)
+        # Stamp only what we regenerated: untouched blocks keep their own
+        # stamps, so other stale modules stay detectable.
+        replacements[rel] = freshness.stamp_block(block, rel, freshness.file_hash(f))
 
     return index.splice_blocks(existing, replacements, deletions)
 

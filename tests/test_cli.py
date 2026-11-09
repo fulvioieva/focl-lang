@@ -213,3 +213,46 @@ class TestMcpCommand:
         runner = CliRunner()
         result = runner.invoke(main, ["mcp", str(tmp_java_project)])
         assert result.exit_code != 0
+
+
+class TestCheckPerModule:
+    """Maps with `@h:` stamps get an exact per-module freshness report."""
+
+    def _stamped_map(self, root: Path) -> Path:
+        from focl import freshness
+        focl = root / (root.name + ".focl")
+        content = "# src: services/UserService.java\nSERVICE UserService\n  get()\n"
+        focl.write_text(freshness.stamp(content, root), encoding="utf-8")
+        return focl
+
+    def test_up_to_date_counts_verified(self, tmp_java_project: Path) -> None:
+        self._stamped_map(tmp_java_project)
+        result = CliRunner().invoke(main, ["check", str(tmp_java_project)])
+        assert result.exit_code == 0
+        assert "up to date" in result.output.lower()
+        assert "1 modules verified" in " ".join(result.output.split())  # rich wraps
+
+    def test_lists_changed_module(self, tmp_java_project: Path) -> None:
+        self._stamped_map(tmp_java_project)
+        src = tmp_java_project / "services" / "UserService.java"
+        src.write_text(src.read_text(encoding="utf-8") + "\n// edit\n", encoding="utf-8")
+        result = CliRunner().invoke(main, ["check", str(tmp_java_project)])
+        assert result.exit_code == 0
+        assert "stale" in result.output.lower()
+        assert "changed" in result.output
+        assert "services/UserService.java" in result.output
+
+    def test_survives_mtime_noise(self, tmp_java_project: Path) -> None:
+        # A checkout that bumps mtimes without changing content is NOT stale.
+        focl = self._stamped_map(tmp_java_project)
+        src = tmp_java_project / "services" / "UserService.java"
+        future = focl.stat().st_mtime + 100
+        os.utime(src, (future, future))
+        result = CliRunner().invoke(main, ["check", str(tmp_java_project)])
+        assert "up to date" in result.output.lower()
+
+    def test_legacy_map_suggests_regeneration(self, tmp_java_project: Path) -> None:
+        focl = tmp_java_project / (tmp_java_project.name + ".focl")
+        focl.write_text("# src: services/UserService.java\nSERVICE X\n", encoding="utf-8")
+        result = CliRunner().invoke(main, ["check", str(tmp_java_project)])
+        assert "no per-module hashes" in result.output

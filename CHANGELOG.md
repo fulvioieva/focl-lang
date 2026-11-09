@@ -18,6 +18,19 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Per-module freshness.** Generated maps stamp every `# src:` line with a
+  short content hash of its source (`# src: a/B.java @h:1a2b3c4d5e6f`;
+  CRLF-insensitive). `generate()` stamps all blocks, surgical `update()` only
+  the ones it regenerated. New module `focl/freshness.py`.
+- `focl check` lists exactly which modules are changed / deleted / new, and is
+  no longer fooled by mtime churn from `git clone`/`checkout`. Maps without
+  stamps fall back to the old mtime comparison and suggest `focl sync`.
+- MCP: `focl_search(query)` (substring search grouped by module),
+  `focl_modules(paths)` (batch fetch); `focl_list_modules` now returns token
+  size and freshness per module; `focl_module` / `focl_overview` /
+  `focl_search` flag stale modules with `[STALE]`.
+
 ### Planned
 - Externalise system prompts to `focl/prompts/` as loadable resources
 

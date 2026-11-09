@@ -7,10 +7,10 @@ map instead of the raw source, directly inside Claude Code.
 
 | Component | What it does |
 |---|---|
-| **MCP server** (`focl`) | Tools `focl_overview`, `focl_list_modules`, `focl_module(path)` and the `focl://project` resource — pull the *compressed* representation on demand. |
+| **MCP server** (`focl`) | Tools `focl_overview`, `focl_list_modules`, `focl_module(path)`, `focl_modules(paths)`, `focl_search(query)` and the `focl://project` resource — pull the *compressed* representation on demand; modules whose source changed are flagged `[STALE]`. |
 | **Skill** (`focl`) | Tells Claude to consult the map for architecture/overview questions before reading source. |
 | **Commands** | `/focl:focl-sync` (regenerate the map), `/focl:focl-decompile` (round-trip back to source). |
-| **Hook** | `SessionStart` runs `focl check` and reports if the map is stale. |
+| **Hook** | `SessionStart` runs `focl check` and lists which modules are stale. |
 
 ## Prerequisites
 

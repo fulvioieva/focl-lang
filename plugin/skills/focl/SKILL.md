@@ -13,17 +13,22 @@ This project ships a token-compressed map of its source — a `.focl` file
 For questions about **architecture, structure, data flow, or "where does X
 happen"**, consult the map first instead of reading whole source files:
 
-- If the **`focl` MCP server** is connected, call `focl_overview` to orient,
-  then `focl_module(path)` for the compressed block of a specific file. Use
-  `focl_list_modules` to see what's available.
+- If the **`focl` MCP server** is connected, call `focl_overview` to orient.
+  For "where does X happen", call `focl_search(query)` first — it's far
+  cheaper than grepping the source. Then `focl_module(path)` (or
+  `focl_modules([...])`) for the compressed blocks you need.
 - Otherwise, read the `.focl` file directly.
+
+A block prefixed with **`[STALE]`** (or a module listed as stale by the
+session-start check) no longer matches its source file: read the real file for
+that module instead of trusting the map.
 
 Only drop to the actual source files for **line-level changes** or details the
 map doesn't capture (exact formatting, comments, generated code).
 
 ## Keeping it fresh
 
-The `SessionStart` hook runs `focl check` and will tell you if the map is stale.
+The `SessionStart` hook runs `focl check` and lists exactly which modules are stale.
 When it is — or after significant edits — regenerate it:
 
 ```bash

@@ -14,15 +14,50 @@ runs until the next marker.
 
 from __future__ import annotations
 
+import re
+
 _SRC_MARKER = "# src:"
+
+# Optional freshness stamp after the path: ``# src: a/B.java @h:1a2b3c4d5e6f``
+# (a short content hash of the source file, see :mod:`focl.freshness`).
+_HASH_SUFFIX = re.compile(r"\s+@h:([0-9a-f]{6,64})\s*$")
+
+
+def split_src(line: str) -> tuple[str | None, str | None]:
+    """Return ``(path, hash)`` from a ``# src:`` line, else ``(None, None)``.
+
+    The hash is None when the line carries no ``@h:`` freshness stamp.
+    """
+    stripped = line.strip()
+    if not stripped.startswith(_SRC_MARKER):
+        return None, None
+    rest = stripped[len(_SRC_MARKER):].strip()
+    m = _HASH_SUFFIX.search(rest)
+    digest = None
+    if m:
+        digest = m.group(1)
+        rest = rest[:m.start()].strip()
+    return (rest or None), (digest if rest else None)
 
 
 def _src_path(line: str) -> str | None:
-    """Return the path from a ``# src: <path>`` line, else None."""
-    stripped = line.strip()
-    if stripped.startswith(_SRC_MARKER):
-        return stripped[len(_SRC_MARKER):].strip() or None
-    return None
+    """Return the path from a ``# src: <path>`` line (stamp stripped), else None."""
+    return split_src(line)[0]
+
+
+def format_src(path: str, digest: str | None = None) -> str:
+    """Render a ``# src:`` marker line (without newline)."""
+    return f"{_SRC_MARKER} {path}" + (f" @h:{digest}" if digest else "")
+
+
+def module_hashes(content: str) -> dict[str, str | None]:
+    """Map each annotated source path to its freshness hash (None if unstamped)."""
+    out: dict[str, str | None] = {}
+    for line in content.splitlines():
+        path, digest = split_src(line)
+        if path is not None and (path not in out or out[path] is None):
+            out[path] = digest
+    return out
 
 
 def header(content: str) -> str:
@@ -146,8 +181,37 @@ def splice_blocks(content: str,
     return "".join(out)
 
 
-def overview(content: str) -> str:
-    """A compact orientation string: header + the list of available modules."""
+def search(content: str, query: str, limit: int = 50) -> list[tuple[str | None, str]]:
+    """Case-insensitive substring search over the .focl, grouped by module.
+
+    Returns ``(source_path, line)`` pairs in file order (``None`` path for
+    header lines). A query matching a module's path also matches its
+    ``# src:`` line, so "where is UserService" finds the block directly.
+    Marker lines are returned without their freshness stamp.
+    """
+    needle = query.strip().lower()
+    if not needle:
+        return []
+    hits: list[tuple[str | None, str]] = []
+    current: str | None = None
+    for line in content.splitlines():
+        path = _src_path(line)
+        if path is not None:
+            current = path
+            line = format_src(path)
+        if needle in line.lower():
+            hits.append((current, line.strip()))
+            if len(hits) >= limit:
+                break
+    return hits
+
+
+def overview(content: str, status: dict[str, str] | None = None) -> str:
+    """A compact orientation string: header + the list of available modules.
+
+    ``status`` optionally maps source paths to a freshness state (see
+    :func:`focl.freshness.module_status`); non-fresh modules get a marker.
+    """
     paths = module_paths(content)
     head = header(content)
 
@@ -156,10 +220,20 @@ def overview(content: str) -> str:
         parts.append(head)
 
     if paths:
-        listing = "\n".join(f"  - {p}" for p in paths)
+        status = status or {}
+
+        def _mark(p: str) -> str:
+            st = status.get(p)
+            return f" [STALE: {st}]" if st in ("changed", "deleted") else ""
+
+        listing = "\n".join(f"  - {p}{_mark(p)}" for p in paths)
         parts.append(
             f"Modules ({len(paths)}):\n{listing}\n\n"
-            "Call focl_module(path) to fetch a module's compressed block."
+            "Call focl_module(path) to fetch a module's compressed block, or "
+            "focl_search(query) to find where something happens."
+            + ("\nModules marked STALE changed since the map was generated — "
+               "read their source files instead."
+               if any(_mark(p) for p in paths) else "")
         )
     else:
         # No `# src:` annotations — hand back the whole thing as the overview.

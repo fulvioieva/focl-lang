@@ -123,3 +123,57 @@ class TestNoAnnotations:
         ov = index.overview(content)
         assert "No `# src:`" in ov
         assert "SERVICE X" in ov
+
+
+class TestFreshnessStamp:
+    _STAMPED = _SAMPLE.replace(
+        "# src: services/UserService.java",
+        "# src: services/UserService.java @h:abcdef123456",
+    )
+
+    def test_stamp_is_stripped_from_path(self) -> None:
+        assert index.module_paths(self._STAMPED)[0] == "services/UserService.java"
+        assert index.get_module(self._STAMPED, "UserService.java") is not None
+
+    def test_module_hashes(self) -> None:
+        assert index.module_hashes(self._STAMPED) == {
+            "services/UserService.java": "abcdef123456",
+            "controllers/UserController.java": None,
+        }
+
+    def test_split_src(self) -> None:
+        assert index.split_src("# src: a/B.java @h:0123abcd") == ("a/B.java", "0123abcd")
+        assert index.split_src("# src: a/B.java") == ("a/B.java", None)
+        assert index.split_src("SERVICE X") == (None, None)
+
+    def test_splice_matches_stamped_block(self) -> None:
+        new = "# src: services/UserService.java @h:999999999999\nSERVICE UserService\n  NEW"
+        out = index.splice_blocks(self._STAMPED, {"services/UserService.java": new})
+        assert "  NEW" in out and "get(id)" not in out
+        assert "@h:abcdef123456" not in out
+
+    def test_overview_marks_stale(self) -> None:
+        ov = index.overview(_SAMPLE, {"services/UserService.java": "changed"})
+        assert "services/UserService.java [STALE: changed]" in ov
+        assert ov.count("[STALE") == 1
+        assert "read their source files" in ov
+
+
+class TestSearch:
+    def test_finds_lines_grouped_by_module(self) -> None:
+        hits = index.search(_SAMPLE, "page")
+        assert hits == [("controllers/UserController.java", "GET /users -> PAGE")]
+
+    def test_matches_module_path(self) -> None:
+        stamped = _SAMPLE.replace("UserService.java", "UserService.java @h:abcdef123456")
+        hits = index.search(stamped, "userservice.java")
+        assert hits[0] == ("services/UserService.java", "# src: services/UserService.java")
+
+    def test_header_hits_have_no_path(self) -> None:
+        assert index.search(_SAMPLE, "project: demo") == [
+            (None, "# FOCL file for project: demo")
+        ]
+
+    def test_limit_and_empty_query(self) -> None:
+        assert len(index.search(_SAMPLE, "user", limit=2)) == 2
+        assert index.search(_SAMPLE, "   ") == []

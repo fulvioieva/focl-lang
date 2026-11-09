@@ -187,17 +187,25 @@ The individual pieces:
 
 ### `focl mcp [path]`
 Run an MCP server exposing the `.focl` map so Claude Code can pull *compressed*
-context on demand — tools `focl_overview`, `focl_list_modules`,
-`focl_module(path)`, and the `focl://project` resource. Requires the extra:
+context on demand — tools `focl_overview`, `focl_list_modules` (paths with token
+size and freshness), `focl_module(path)`, `focl_modules(paths)`,
+`focl_search(query)` ("where does X happen", grouped by module), and the
+`focl://project` resource. Modules whose source changed since the map was
+generated are flagged `[STALE]`, so Claude knows to read the real file instead.
+Requires the extra:
 
 ```bash
 pip install -e ".[mcp]"
 ```
 
 ### `focl check [path]`
-Offline freshness check (no API call): compares source mtimes against the
-`.focl` and reports whether it's up to date or stale. The `SessionStart` hook
-runs this so Claude is told up front when to `focl sync`.
+Offline freshness check (no API call). Every `# src:` line of a generated map
+carries a short content hash of its source (`# src: a/B.java @h:1a2b3c4d5e6f`),
+so `check` lists exactly which modules changed, were deleted, or are new — and
+isn't fooled by `git clone`/`checkout` bumping mtimes or CRLF conversion. Maps
+generated before hashes existed fall back to comparing mtimes (re-run `focl sync`
+to upgrade). The `SessionStart` hook runs this so Claude is told up front which
+modules not to trust.
 
 ### `focl init/sync --claude`
 Just the lightweight `CLAUDE.md` pointer, without the MCP/hook/skill scaffolding.

@@ -92,3 +92,28 @@ class TestFallback:
         # Fallback returns the model output directly (one call), not a splice.
         assert "STUBBED" in result
         assert len(stub_llm) == 1
+
+
+class TestFreshnessStamps:
+    def test_update_stamps_only_regenerated_block(self, tmp_path: Path, stub_llm) -> None:
+        from focl import freshness, index
+        focl = _write_focl(tmp_path)
+        (tmp_path / "a.py").write_text("def do(): ...\n")
+        result = gen.update(focl, [tmp_path / "a.py"], tmp_path)
+        hashes = index.module_hashes(result)
+        assert hashes["a.py"] == freshness.file_hash(tmp_path / "a.py")
+        assert hashes["b.py"] is None  # untouched block keeps its (absent) stamp
+
+    def test_generate_stamps_every_block(self, tmp_python_project: Path, stub_llm,
+                                         monkeypatch) -> None:
+        from focl import freshness, index
+        from focl.analyzer import detect
+
+        monkeypatch.setattr(
+            gen, "generate_text",
+            lambda c, s, u, m: "# src: demo/service.py\nMOD service\n  hello()\n",
+        )
+        result = gen.generate(detect(tmp_python_project))
+        assert index.module_hashes(result)["demo/service.py"] == freshness.file_hash(
+            tmp_python_project / "demo" / "service.py"
+        )

@@ -44,11 +44,9 @@ def _raw_src_paths(content: str) -> list[str]:
     """All ``# src:`` paths in order, including duplicates."""
     paths: list[str] = []
     for line in content.splitlines():
-        s = line.strip()
-        if s.startswith("# src:"):
-            rest = s[len("# src:"):].strip()
-            if rest:
-                paths.append(rest)
+        path = index.split_src(line)[0]  # freshness stamp stripped
+        if path:
+            paths.append(path)
     return paths
 
 

@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-from . import __version__
+from . import __version__, freshness
 from .analyzer import detect
 from .decompiler import decompile as decompile_focl
 from .generator import generate, update
@@ -166,10 +166,13 @@ def _render_skill(focl_name: str) -> str:
         "(~70–80% smaller than the source).\n\n"
         "When the question is about architecture, structure, data flow, or "
         f"\"where does X happen\", read `{focl_name}` first — or, if the `focl` "
-        "MCP server is connected, call `focl_overview` and then "
-        "`focl_module(path)` for the relevant file. Only drop to the actual "
-        "source files for line-level changes or details the map doesn't capture.\n\n"
-        "If the map looks stale, regenerate it with `focl sync`.\n"
+        "MCP server is connected, call `focl_overview`, use `focl_search(query)` "
+        "to locate things, then `focl_module(path)` for the relevant file. Only "
+        "drop to the actual source files for line-level changes or details the "
+        "map doesn't capture.\n\n"
+        "A block marked `[STALE]` (or a module the session-start `focl check` "
+        "lists as changed) no longer matches its source: read the real file for "
+        "it. Regenerate the map with `focl sync`.\n"
     )
 
 
@@ -468,7 +471,7 @@ def mcp(path: str, focl_file: str | None) -> None:
         click.echo(f"Error: {out.name} not found. Run 'focl init' first.", err=True)
         sys.exit(1)
     try:
-        mcp_serve(out)
+        mcp_serve(out, root)
     except RuntimeError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
@@ -511,24 +514,72 @@ def validate(path: str, focl_file: str | None, strict: bool) -> None:
 @click.argument("path", default=".", required=False)
 @click.option("--focl-file", "-f", default=None, help="Path to the .focl file")
 def check(path: str, focl_file: str | None) -> None:
-    """Report whether the .focl map is up to date with the sources (offline)."""
+    """Report whether the .focl map is up to date with the sources (offline).
+
+    Maps whose `# src:` lines carry `@h:` content hashes (stamped by the
+    generator) get an exact per-module answer: this
+    lists exactly which modules are stale. Older maps fall back to comparing
+    modification times.
+    """
     root = _resolve_root(path)
     out = Path(focl_file).resolve() if focl_file else _focl_path(root, None)
     if not out.exists():
         console.print(
-            f"[yellow]FOCL map missing[/yellow] — run `focl init` to create {out.name}."
+            f"[yellow]FOCL map missing[/yellow] -> run `focl init` to create {out.name}."
         )
         return
 
     info = detect(root)
-    newest = _newest_source_mtime(info.files, exclude=out)
+    content = out.read_text(encoding="utf-8")
+    report = freshness.check(content, root, info.files,
+                             focl_mtime=out.stat().st_mtime, exclude=out)
+
+    if not report.tracked:
+        _check_by_mtime(info.files, out)
+        return
+
+    if not report.stale:
+        console.print(
+            f"[green]FOCL map is up to date[/green] ({out.name}, "
+            f"{report.fresh} modules verified)."
+        )
+        return
+
+    console.print(
+        f"[yellow]FOCL map is stale[/yellow] ({out.name}): "
+        f"{len(report.changed)} changed, {len(report.deleted)} deleted, "
+        f"{len(report.added)} new; {report.fresh} modules still fresh."
+    )
+    rows = ([("changed", p) for p in report.changed]
+            + [("deleted", p) for p in report.deleted]
+            + [("new", p) for p in report.added])
+    for label, p in rows[:_CHECK_LIST_LIMIT]:
+        console.print(f"  {label:<8}{p}", markup=False, highlight=False)
+    if len(rows) > _CHECK_LIST_LIMIT:
+        console.print(f"  ... and {len(rows) - _CHECK_LIST_LIMIT} more")
+    console.print(
+        "For these modules read the source files, not the map. "
+        "Run `focl sync` to refresh it."
+    )
+
+
+_CHECK_LIST_LIMIT = 20
+
+
+def _check_by_mtime(files: list[Path], out: Path) -> None:
+    """Legacy freshness check for maps without per-module hashes."""
+    newest = _newest_source_mtime(files, exclude=out)
     if newest is not None and newest > out.stat().st_mtime:
         console.print(
-            f"[yellow]FOCL map is stale[/yellow] — sources changed since "
+            f"[yellow]FOCL map is stale[/yellow] -> sources changed since "
             f"{out.name} was generated. Run `focl sync` to refresh it."
         )
     else:
         console.print(f"[green]FOCL map is up to date[/green] ({out.name}).")
+    console.print(
+        "[dim]This map has no per-module hashes; regenerate it with `focl sync` "
+        "to get exact per-file staleness.[/dim]"
+    )
 
 
 @main.command()
