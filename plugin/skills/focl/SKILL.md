@@ -26,6 +26,14 @@ that module instead of trusting the map.
 Only drop to the actual source files for **line-level changes** or details the
 map doesn't capture (exact formatting, comments, generated code).
 
+## Delegate broad questions
+
+For questions that need several searches or modules ("how is auth wired?",
+"what touches `Order`?"), hand them to the **`focl-explorer`** subagent instead
+of querying the map yourself. It works in its own context and returns just the
+answer plus the source paths, so neither the map nor the sources fill this
+conversation. Answer single, narrow lookups directly with `focl_search`.
+
 ## Keeping it fresh
 
 The `SessionStart` hook runs `focl check` and lists exactly which modules are stale.

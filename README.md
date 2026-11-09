@@ -190,7 +190,11 @@ This writes (merging into anything that already exists):
 - a `CLAUDE.md` pointer telling Claude Code to read the compressed map first;
 - `.mcp.json` registering the **FOCL MCP server** (`focl mcp`);
 - a `SessionStart` hook in `.claude/settings.json` that runs `focl check`;
-- a Claude Code **skill** describing when to consult the map.
+- a Claude Code **skill** describing when to consult the map;
+- a **`focl-explorer` subagent** (`.claude/agents/`) that answers architecture /
+  "where does X happen" questions from the map in its own context and returns
+  just the conclusion plus source paths — so the map never fills the main
+  conversation.
 
 Use `--dry-run` to preview. Then restart Claude Code.
 

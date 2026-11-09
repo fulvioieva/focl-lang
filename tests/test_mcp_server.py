@@ -100,3 +100,17 @@ def test_missing_map_is_explained_not_an_error(tmp_path: Path) -> None:
     msg = ms.missing_map_text(missing)
     assert "nope.focl" in msg and "focl init" in msg
     assert build_server(missing) is not None  # constructing must not fail
+
+
+def test_agent_tools_match_server_tools(tmp_path: Path) -> None:
+    """The focl-explorer subagent must list exactly the server's tools."""
+    import asyncio
+    import re
+
+    from focl.cli import MCP_PREFIX_PROJECT, _render_agent
+
+    focl = tmp_path / "demo.focl"
+    focl.write_text("# src: A.java\nSERVICE A\n", encoding="utf-8")
+    server_tools = {t.name for t in asyncio.run(build_server(focl).list_tools())}
+    agent_tools = set(re.findall(re.escape(MCP_PREFIX_PROJECT) + r"(\w+)", _render_agent()))
+    assert agent_tools == server_tools

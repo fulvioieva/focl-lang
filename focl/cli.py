@@ -179,6 +179,25 @@ def _render_skill() -> str:
     return resources.files("focl").joinpath("assets/SKILL.md").read_text(encoding="utf-8")
 
 
+# MCP tool-name prefixes for the `focl` server: Claude Code namespaces plugin
+# servers as mcp__plugin_<plugin>_<server>__, project (.mcp.json) ones as
+# mcp__<server>__.
+MCP_PREFIX_PLUGIN = "mcp__plugin_focl_focl__"
+MCP_PREFIX_PROJECT = "mcp__focl__"
+
+
+def _render_agent(mcp_prefix: str = MCP_PREFIX_PROJECT) -> str:
+    """The `focl-explorer` subagent, with tool names for the given MCP prefix.
+
+    Source of truth: ``focl/assets/focl-explorer.md`` (``{{MCP}}`` placeholder).
+    ``plugin/agents/focl-explorer.md`` must equal ``_render_agent(MCP_PREFIX_PLUGIN)``
+    (enforced by a test); ``claude-setup`` writes the project-prefix variant.
+    """
+    template = resources.files("focl").joinpath("assets/focl-explorer.md").read_text(
+        encoding="utf-8")
+    return template.replace("{{MCP}}", mcp_prefix)
+
+
 def _enabled_focl_plugin(root: Path, home: Path | None = None) -> Path | None:
     """The settings file that enables the ``focl`` Claude Code plugin, if any.
 
@@ -217,6 +236,8 @@ def _standalone_leftovers(root: Path) -> list[str]:
         found.append(".claude/settings.json (focl check hook)")
     if (root / ".claude" / "skills" / "focl" / "SKILL.md").exists():
         found.append(".claude/skills/focl/SKILL.md")
+    if (root / ".claude" / "agents" / "focl-explorer.md").exists():
+        found.append(".claude/agents/focl-explorer.md")
     return found
 
 
@@ -812,7 +833,7 @@ def _safe_join(base: Path, rel: str) -> Path | None:
 @click.option("--standalone", is_flag=True,
               help="Write the MCP/hook/skill files even if the focl plugin is enabled")
 def claude_setup(path: str, focl_file: str | None, dry_run: bool, standalone: bool) -> None:
-    """Scaffold Claude Code integration (MCP server, freshness hook, skill).
+    """Scaffold Claude Code integration (MCP server, freshness hook, skill, subagent).
 
     If the `focl` Claude Code plugin is already enabled, only the CLAUDE.md
     pointer is written — the plugin provides the rest, and writing it again
@@ -825,6 +846,7 @@ def claude_setup(path: str, focl_file: str | None, dry_run: bool, standalone: bo
     mcp_path = root / ".mcp.json"
     settings_path = root / ".claude" / "settings.json"
     skill_path = root / ".claude" / "skills" / "focl" / "SKILL.md"
+    agent_path = root / ".claude" / "agents" / "focl-explorer.md"
     claude_md = root / "CLAUDE.md"
 
     actions: list[tuple[str, Path, str]] = [
@@ -838,7 +860,7 @@ def claude_setup(path: str, focl_file: str | None, dry_run: bool, standalone: bo
     if plugin_settings is not None:
         console.print(
             f"[cyan]focl plugin is enabled[/cyan] ({plugin_settings}) -> it already "
-            "provides the MCP server, hook and skill; writing only the CLAUDE.md "
+            "provides the MCP server, hook, skill and subagent; writing only the CLAUDE.md "
             "pointer. Use --standalone to write them anyway."
         )
         leftovers = _standalone_leftovers(root)
@@ -856,6 +878,7 @@ def claude_setup(path: str, focl_file: str | None, dry_run: bool, standalone: bo
             (".claude/settings.json (freshness hook)", settings_path,
              json.dumps(_merge_settings_hook(_read_json(settings_path)), indent=2) + "\n"),
             (".claude/skills/focl/SKILL.md (skill)", skill_path, _render_skill()),
+            (".claude/agents/focl-explorer.md (subagent)", agent_path, _render_agent()),
         ]
 
     for label, target, content in actions:

@@ -14,9 +14,11 @@ from focl.cli import (
     _CLAUDE_END,
     _CLAUDE_START,
     _HOOK_COMMAND,
+    MCP_PREFIX_PLUGIN,
     _enabled_focl_plugin,
     _merge_mcp_json,
     _merge_settings_hook,
+    _render_agent,
     _render_skill,
     _upsert_claude_pointer,
     main,
@@ -253,6 +255,20 @@ class TestHookAndSkillSingleSource:
             "edit the asset and copy it over"
         )
 
+    def test_plugin_agent_matches_template(self) -> None:
+        plugin_agent = (_REPO / "plugin" / "agents" / "focl-explorer.md").read_text(
+            encoding="utf-8")
+        assert plugin_agent == _render_agent(MCP_PREFIX_PLUGIN), (
+            "plugin/agents/focl-explorer.md drifted from focl/assets/focl-explorer.md - "
+            "regenerate it with _render_agent(MCP_PREFIX_PLUGIN)"
+        )
+
+    def test_agent_prefixes(self) -> None:
+        project = _render_agent()
+        assert '"mcp__focl__focl_search"' in project
+        assert "{{MCP}}" not in project
+        assert '"mcp__plugin_focl_focl__focl_search"' in _render_agent(MCP_PREFIX_PLUGIN)
+
     def test_hook_command_is_hook_mode_with_fallback(self) -> None:
         assert _HOOK_COMMAND.startswith("focl check --hook || echo ")
 
@@ -323,6 +339,7 @@ class TestPluginAwareSetup:
         assert "duplicate the plugin" in flat
         assert ".mcp.json (focl MCP server)" in flat
         assert ".claude/settings.json (focl check hook)" in flat
+        assert ".claude/agents/focl-explorer.md" in flat
 
     def test_standalone_flag_overrides(self, tmp_java_project: Path,
                                        _isolated_home: Path) -> None:
@@ -333,6 +350,8 @@ class TestPluginAwareSetup:
         assert (tmp_java_project / ".mcp.json").exists()
         skill = tmp_java_project / ".claude" / "skills" / "focl" / "SKILL.md"
         assert skill.read_text(encoding="utf-8") == _render_skill()
+        agent = tmp_java_project / ".claude" / "agents" / "focl-explorer.md"
+        assert agent.read_text(encoding="utf-8") == _render_agent()  # project prefix
 
 
 class TestCheckPerModule:
