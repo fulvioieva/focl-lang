@@ -42,6 +42,23 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   paths. Tools: the FOCL MCP tools + read-only `Read`/`Grep`/`Glob`. The skill
   now tells Claude to delegate broad questions to it.
 
+- **`--provider claude-code`** — compress through the locally installed Claude
+  Code CLI (`claude -p`), using its login (e.g. a Claude subscription): no API
+  key needed. Isolated call (FOCL system prompt via file, user message via
+  stdin, no tools / MCP / settings / hooks / session, empty temp cwd);
+  `--model` takes aliases (`opus` default, `sonnet`, `haiku`). Verified end to
+  end with `focl init` and `focl sync --changed`. The plugin's `/focl-sync`
+  and `/focl-decompile` fall back to it when no API key is set.
+
+### Fixed
+- Generator prompt now requires one `# src:` path per block and forbids
+  merging files: a real model run produced `# src: a.py, b.py`, which silently
+  disabled per-module lookup and freshness stamps.
+- Paths sent to the model are always forward-slashed (`wrap_file`), so maps
+  generated on Windows match maps generated elsewhere.
+- Progress spinner is ASCII: rich's braille frames crashed `focl init`/`sync`
+  on the cp1252 Windows console (including when Claude Code runs them).
+
 ### Changed
 - **Claude Code integration hardening.**
   - Single source for the skill: `focl/assets/SKILL.md` (package data) is what

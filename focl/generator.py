@@ -49,14 +49,17 @@ FOCL grammar rules:
     PARSE_ENUM(raw, type)         — safe enum parsing
     OTP_FLOW(channel, ttl)        — OTP send/verify cycle
     ISSUE_SESSION(subject, roles) — JWT/session issuance
-- Annotate each top-level block with its source file as a comment:
+- Give every source file its OWN block(s). Start each with exactly one line
     # src: path/to/File.java
+  using the path exactly as written in that file's `=== path ===` header.
+  One path per `# src:` line: never list several files on one line and never
+  merge files into a shared block (tooling indexes the map by these lines).
 - Omit: boilerplate constructors, getters/setters, logger declarations, \
   trivial mappers, framework annotations that are obvious from context.
 - Keep: every business rule, validation, error code, ownership check, \
   state guard, external integration endpoint, and config key.
 - Format output as plain text FOCL — no markdown, no fences, no explanation.
-- Start directly with the first block (e.g. CONFIG{...}).
+- Start directly with the first `# src:` line.
 """
 
 _SHARD_USER_PREFIX = (

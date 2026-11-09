@@ -27,13 +27,18 @@ from .watcher import watch
 
 console = Console()
 
+# ASCII spinner (- \ | /): rich's default braille frames crash on the legacy
+# cp1252 Windows console — including when Claude Code runs `focl` via Bash.
+_SPINNER = "line"
+
 
 def _llm_options(f):
     """Attach the shared provider/model/key/base-url options to a command."""
     f = click.option("--base-url", default=None,
                      help="Override the provider's API base URL")(f)
     f = click.option("--api-key", default=None,
-                     help="API key (else <PROVIDER>_API_KEY env var)")(f)
+                     help="API key (else <PROVIDER>_API_KEY env var; "
+                          "not used by claude-code)")(f)
     f = click.option("--model", default=None,
                      help="Model id/slug (provider default if unset)")(f)
     f = click.option("--provider", type=click.Choice(PROVIDERS),
@@ -286,7 +291,7 @@ def _generate_and_report(info, out: Path, *, config: LLMConfig,
 
     Shared by `init` and `sync`, which differ only in the failure label shown.
     """
-    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+    with Progress(SpinnerColumn(spinner_name=_SPINNER), TextColumn("[progress.description]{task.description}"),
                   console=console) as progress:
         task = progress.add_task("Starting...", total=None)
 
@@ -454,7 +459,7 @@ def _sync_changed(root: Path, out: Path, config: LLMConfig, dry_run: bool) -> No
 
     console.print(f"  Model:  [green]{config.provider}[/green] / {config.model}")
     files = [root / p.replace("\\", "/") for p in report.stale_paths]
-    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+    with Progress(SpinnerColumn(spinner_name=_SPINNER), TextColumn("[progress.description]{task.description}"),
                   console=console) as progress:
         task = progress.add_task("Starting...", total=None)
         t0 = time.time()
@@ -784,7 +789,7 @@ def decompile(path: str, focl_file: str | None, output: str | None, lang: str | 
     console.print(f"[bold]FOCL[/bold] decompiling [cyan]{src.name}[/cyan]")
     console.print(f"  Model:  [green]{config.provider}[/green] / {config.model}")
 
-    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+    with Progress(SpinnerColumn(spinner_name=_SPINNER), TextColumn("[progress.description]{task.description}"),
                   console=console) as progress:
         task = progress.add_task("Starting...", total=None)
         try:

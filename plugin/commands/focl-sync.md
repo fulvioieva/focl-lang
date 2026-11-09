@@ -14,6 +14,10 @@ Refresh the `.focl` map in the project root.
    for a **full** regeneration, run `focl sync` instead and report the token
    savings it prints (source tokens → FOCL tokens, percentage saved).
 4. If no `.focl` exists yet, run `focl init .`.
+5. If a command fails because **no API key** is set (`ANTHROPIC_API_KEY` /
+   `OPENROUTER_API_KEY`), re-run it with `--provider claude-code`: it compresses
+   through this Claude Code installation's own login, so no key is needed.
+   Tell the user you did so.
 
 To preview without calling the API, `focl sync --changed --dry-run` lists the
 stale modules.

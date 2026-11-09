@@ -137,7 +137,7 @@ class TestBuildShardContext:
         result = shard_project(info, budget=DEFAULT_SHARD_BUDGET)
         ctx = build_shard_context(result.shards[0], info.root)
         assert "=== " in ctx
-        # Each file must appear with its relative path
+        # Each file must appear with its forward-slashed relative path (all OSes)
         for f in result.shards[0].files:
-            rel = f.relative_to(info.root)
-            assert str(rel) in ctx or str(rel).replace("/", "\\") in ctx
+            rel = f.relative_to(info.root).as_posix()
+            assert f"=== {rel} ===" in ctx

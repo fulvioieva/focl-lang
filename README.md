@@ -88,11 +88,28 @@ export OPENROUTER_API_KEY=sk-or-...
 focl init . --provider openrouter --model openai/gpt-4o
 ```
 
+**No API key? Use Claude Code.** If the [Claude Code](https://claude.com/claude-code)
+CLI is installed and logged in, `--provider claude-code` runs each compression
+through it headless (`claude -p`), using whatever account Claude Code uses (e.g.
+a Claude subscription) — no `*_API_KEY` needed. `--model` takes Claude Code
+aliases (`opus` — the default —, `sonnet`, `haiku`) or a full model name:
+
+```bash
+focl init . --provider claude-code                 # latest Opus
+focl sync . --changed --provider claude-code --model sonnet
+```
+
+The call is isolated: FOCL's own system prompt, no tools, no MCP servers, no
+user/project settings (so no hooks or plugins), no saved session, run from an
+empty temp directory. If `ANTHROPIC_API_KEY` is set in your environment, Claude
+Code may bill that key instead of your subscription — unset it to be sure.
+
 Flags available on `init`, `sync`, `watch`, and `stats`:
-`--provider {anthropic,openrouter}`, `--model <id/slug>`, `--api-key`, `--base-url`.
-The API key is read from `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` depending on
-the provider. Exact token counting (`--exact-tokens`) is Anthropic-only; other
-providers fall back to the offline estimate.
+`--provider {anthropic,openrouter,claude-code}`, `--model <id/slug>`, `--api-key`,
+`--base-url`. The API key is read from `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`
+depending on the provider (`claude-code` needs none). Exact token counting
+(`--exact-tokens`) is Anthropic-only; other providers fall back to the offline
+estimate.
 
 ## Commands
 

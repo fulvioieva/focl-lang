@@ -130,8 +130,11 @@ def wrap_file(rel: Path | str, content: str) -> str:
 
     This `=== relpath ===` shape is the universal interchange format shared by
     the analyzer, sharder, generator, and metrics — keep it defined here only.
+
+    Paths are always forward-slashed: the model copies them into `# src:`
+    lines, and a map generated on Windows must match one generated elsewhere.
     """
-    return f"=== {rel} ===\n{content}"
+    return f"=== {str(rel).replace(chr(92), '/')} ===\n{content}"
 
 
 def build_context(info: ProjectInfo) -> str:

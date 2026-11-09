@@ -115,4 +115,10 @@ class TestBuildContext:
         ctx = build_context(info)
         # Should see relative path like "services/UserService.java", not absolute
         assert str(tmp_java_project) not in ctx
-        assert "services/UserService.java" in ctx or "services\\UserService.java" in ctx
+        # Always forward slashes, on every OS — the model copies them into `# src:`.
+        assert "=== services/UserService.java ===" in ctx
+        assert "services\\UserService.java" not in ctx
+
+    def test_wrap_file_normalises_backslashes(self) -> None:
+        from focl.analyzer import wrap_file
+        assert wrap_file("orders\\api.py", "x").startswith("=== orders/api.py ===\n")

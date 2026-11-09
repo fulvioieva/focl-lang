@@ -94,6 +94,14 @@ class TestFallback:
         assert len(stub_llm) == 1
 
 
+def test_system_prompt_requires_one_file_per_block() -> None:
+    # Found with a real model: without this rule it wrote
+    # `# src: a.py, b.py` for one merged block, which breaks per-module
+    # lookup and freshness stamps.
+    assert "One path per `# src:` line" in gen._SYSTEM_PROMPT
+    assert "never" in gen._SYSTEM_PROMPT and "merge files" in gen._SYSTEM_PROMPT
+
+
 class TestFreshnessStamps:
     def test_update_stamps_only_regenerated_block(self, tmp_path: Path, stub_llm) -> None:
         from focl import freshness, index
