@@ -1,0 +1,42 @@
+schema_version: "1.1"
+name: support-refund
+description: >
+  A subtle authorization interaction across two modules: the refund endpoint
+  requires the "support" role, but the service still applies the owner check,
+  so support can only refund their own orders. Tests reasoning, not lookup.
+tags: [security, cross-module, reasoning]
+runs: 3
+execution:
+  max_turns: 20
+  timeout_seconds: 300
+  allowed_tools: [Read, Glob, Grep, Skill]
+  prompt: |
+    The project in the current directory is a small shop backend.
+    Question: can a user with the "support" role refund an order that was
+    placed by a different customer? Explain why or why not, based on the code.
+    Answer in a few sentences; do not modify any file.
+expected_outcome: >
+  No. POST /orders/{id}/refund requires the support role, but
+  OrderService.refund calls get(), which enforces owner_id == user.id, so a
+  support user gets ORDER_NOT_FOUND for another customer's order (they can
+  only refund their own). Refunds also need status DELIVERED and the 14-day
+  window.
+context:
+  scaffold_script: scaffold.sh
+graders:
+  - name: answers-no-because-owner-check
+    type: llm
+    criteria: >
+      PASS if the answer concludes that a support user can NOT refund another
+      customer's order, because the refund path goes through the service's
+      ownership check (get / owner_id == user.id), which rejects it (e.g.
+      with ORDER_NOT_FOUND) despite the role check passing. FAIL if it says
+      support can refund any order, or gives the role check as the only rule.
+  - name: mentions-error-code
+    type: regex
+    pattern: "ORDER_NOT_FOUND"
+  - name: used-focl-map
+    type: regex
+    target: trace
+    pattern: "mcp__plugin_focl_focl__focl_"
+    arm: with-only

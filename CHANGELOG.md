@@ -49,6 +49,12 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--model` takes aliases (`opus` default, `sonnet`, `haiku`). Verified end to
   end with `focl init` and `focl sync --changed`. The plugin's `/focl-sync`
   and `/focl-decompile` fall back to it when no API key is set.
+- **Plugin eval suite** (`plugin/evals/`, run with `claude plugin eval`):
+  4 cases over a fixture shop backend with a pre-generated map, each run with
+  and without the plugin against the real `focl mcp` server; `summarize.py`
+  splits cost/turns per arm. First run (Sonnet): equal quality (1.00 vs 1.00),
+  +3% cost with the plugin on this ~8 KB fixture, and the skill did not fire
+  for the broad `integrations` question. See `plugin/evals/README.md`.
 
 ### Fixed
 - Generator prompt now requires one `# src:` path per block and forbids

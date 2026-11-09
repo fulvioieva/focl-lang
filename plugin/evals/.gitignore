@@ -1,0 +1,4 @@
+results/
+# The repo ignores *.focl (generated maps), but the eval fixture's map is an
+# input: committed, hash-stamped against the fixture sources.
+!fixtures/shop/shop.focl

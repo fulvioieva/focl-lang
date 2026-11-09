@@ -1,0 +1,86 @@
+# src: shop/__init__.py @h:e3b0c44298fc
+PKG empty
+
+# src: shop/auth/__init__.py @h:e3b0c44298fc
+PKG empty
+
+# src: shop/auth/tokens.py @h:40e8651a86fc
+JWT
+  alg=HS256 secret=CONFIG.JWT_SECRET ttl=CONFIG.JWT_TTL_SECONDS
+  issue_token(user): ISSUE_SESSION(sub=str(user.id), roles=list(user.roles)) claims{sub,roles,iat=now,exp=now+ttl}
+  current_user(authorization, users):
+    SILENT_GUARD(!authorization.startswith("Bearer ")) -> Forbidden AUTH_MISSING_TOKEN
+    decode(authorization[7:]); ExpiredSignatureError -> Forbidden AUTH_TOKEN_EXPIRED
+    NOTE other jwt.InvalidTokenError (bad sig/malformed) uncaught -> propagates raw
+    user=users.get(int(sub)); SILENT_GUARD(user None | !user.active) -> Forbidden AUTH_USER_DISABLED
+    -> user
+  require_role(user, role): SILENT_GUARD(role !in user.roles) -> Forbidden AUTH_ROLE_REQUIRED
+
+# src: shop/config.py @h:39f675b4f7e8
+CONFIG env
+  DATABASE_URL=SHOP_DATABASE_URL?"sqlite:///shop.db"
+  PAYMENT_GATEWAY_URL=SHOP_PAYMENT_GATEWAY_URL?"https://pay.example.com/v2"
+  PAYMENT_API_KEY=SHOP_PAYMENT_API_KEY required
+  SMTP_HOST=SHOP_SMTP_HOST?"localhost"
+  JWT_SECRET=SHOP_JWT_SECRET required
+  JWT_TTL_SECONDS=int(SHOP_JWT_TTL_SECONDS?"3600")
+  REFUND_WINDOW_DAYS=14 const
+
+# src: shop/errors.py @h:fcff50e6c560
+ERRORS
+  ShopError(Exception) status=400 code="SHOP_ERROR"
+  NotFound(ShopError) status=404
+  Forbidden(ShopError) status=403
+  error(cls, code) -> cls(code) with .code=code
+
+# src: shop/notifications/__init__.py @h:e3b0c44298fc
+PKG empty
+
+# src: shop/notifications/mailer.py @h:d201ce9df3dc
+SERVICE mailer
+  TEMPLATES{order_paid:"Thanks! Order #{id} is paid.", order_cancelled:"Order #{id} was cancelled.", order_refunded:"Order #{id} was refunded."}
+  send_order_email(to, order, template): SMTP(CONFIG.SMTP_HOST) From=orders@shop.example.com Subject="Your order #{order.id}" body=TEMPLATES[template].format(id) ; unknown template -> KeyError
+
+# src: shop/orders/__init__.py @h:e3b0c44298fc
+PKG empty
+
+# src: shop/orders/api.py @h:cec3928fdd54
+CTRL /orders (FastAPI) all routes auth=current_user
+  GET ""               (status:OrderStatus?, page=1) -> repo.list_for_owner(user.id, status, page)
+  GET /{order_id}      -> svc.get(user, id)
+  POST /{order_id}/pay    -> svc.pay
+  POST /{order_id}/cancel -> svc.cancel
+  POST /{order_id}/refund -> require_role(user,"support"); svc.refund
+    NOTE svc.refund uses OWNED_FETCH -> support can refund only own orders (others -> ORDER_NOT_FOUND)
+
+# src: shop/orders/models.py @h:09eac6ccd846
+ENUM OrderStatus(str) NEW PAID SHIPPED DELIVERED CANCELLED REFUNDED
+ENTITY OrderLine sku:str quantity:int unit_price_cents:int
+ENTITY Order id:int owner_id:int status=NEW lines:list[OrderLine]=[] delivered_at:datetime? payment_id:str?
+  total_cents = sum(quantity*unit_price_cents)
+
+# src: shop/orders/repository.py @h:deef3d7e0372
+REPO OrderRepository(session)
+  find(id) -> Order?
+  list_for_owner(owner_id, status?, page=1, size=20): FILTER_EQ(owner_id) FILTER_EQ(status) if set; order id desc; PAGE(offset=(page-1)*size, limit=size)
+  save(order): add+commit -> order
+
+# src: shop/orders/service.py @h:c2a95563ad7b
+SERVICE OrderService(repo, gateway)
+  CANCELLABLE={NEW,PAID}
+  get(user,id): OWNED_FETCH(repo, by=owner_id==user.id); missing|not-owner -> NotFound ORDER_NOT_FOUND (same error, no leak)
+  pay: get; TRANSITION(NEW->PAID) else ShopError ORDER_ALREADY_PAID; !lines -> ORDER_EMPTY
+    payment_id=gateway.charge(total_cents, ref="order-{id}"); save; mail(user.email, order_paid)
+  cancel: get; status !in CANCELLABLE -> ORDER_NOT_CANCELLABLE; if PAID gateway.refund(payment_id,total)
+    TRANSITION(NEW|PAID->CANCELLED); save; mail(order_cancelled)
+  refund: get; status!=DELIVERED -> ORDER_NOT_DELIVERED; utcnow-delivered_at > REFUND_WINDOW_DAYS -> REFUND_WINDOW_EXPIRED (delivered_at None -> TypeError)
+    gateway.refund(payment_id,total); TRANSITION(DELIVERED->REFUNDED); save; mail(order_refunded)
+  NOTE mail sent to acting user's email after commit; no transition into SHIPPED/DELIVERED here
+
+# src: shop/payments/__init__.py @h:e3b0c44298fc
+PKG empty
+
+# src: shop/payments/gateway.py @h:ac97113f03fa
+SERVICE PaymentGateway(client?=httpx base_url=CONFIG.PAYMENT_GATEWAY_URL, Authorization="Bearer {PAYMENT_API_KEY}", timeout=10s)
+  charge(amount_cents, reference): POST /charges {amount, currency:"EUR", reference}; 402 -> ShopError PAYMENT_DECLINED; other non-2xx -> raise_for_status; -> json.id
+  refund(payment_id, amount_cents): POST /charges/{payment_id}/refunds {amount}; raise_for_status

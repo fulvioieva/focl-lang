@@ -20,6 +20,12 @@ Don't combine it with `focl claude-setup` in the same project — that would
 register the MCP server and the hook twice. `claude-setup` detects the enabled
 plugin and then writes only the `CLAUDE.md` pointer.
 
+## Does it help?
+
+`evals/` holds a `claude plugin eval` suite that runs each question with and
+without the plugin and compares quality and cost — see
+[`evals/README.md`](evals/README.md) for how to run it and the first results.
+
 ## Prerequisites
 
 The plugin is the Claude Code glue; the engine is the `focl` CLI:

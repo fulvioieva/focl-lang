@@ -1,0 +1,43 @@
+schema_version: "1.1"
+name: ownership-check
+description: >
+  Locate a security rule. The answer lives in one module; the question is
+  whether Claude finds it via the FOCL map (focl_search / focl_module) rather
+  than reading the sources.
+tags: [where-is, security]
+runs: 3
+execution:
+  max_turns: 15
+  timeout_seconds: 300
+  allowed_tools: [Read, Glob, Grep, Skill]
+  prompt: |
+    The project in the current directory is a small shop backend.
+    Question: where is it enforced that a customer can only access their own
+    orders, and what exactly happens when they request an order that belongs
+    to someone else? Name the source file and the error code.
+    Answer in a few sentences; do not modify any file.
+expected_outcome: >
+  shop/orders/service.py, OrderService.get; raises NotFound with
+  ORDER_NOT_FOUND, the same error as for a missing order (no information leak).
+context:
+  scaffold_script: scaffold.sh
+graders:
+  - name: names-service-file
+    type: regex
+    pattern: "orders/service\\.py"
+  - name: names-error-code
+    type: regex
+    pattern: "ORDER_NOT_FOUND"
+  - name: explains-no-leak
+    type: llm
+    criteria: >
+      PASS if the answer says that requesting another customer's order yields
+      the same not-found error (ORDER_NOT_FOUND / NotFound, 404) as a missing
+      order, so the API does not reveal that the order exists. FAIL if it
+      claims a 403/Forbidden or a distinct "not yours" error, or omits what
+      happens.
+  - name: used-focl-map
+    type: regex
+    target: trace
+    pattern: "mcp__plugin_focl_focl__focl_"
+    arm: with-only

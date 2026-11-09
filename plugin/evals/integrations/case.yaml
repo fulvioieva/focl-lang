@@ -1,0 +1,47 @@
+schema_version: "1.1"
+name: integrations
+description: >
+  Broad architecture question: every external system the app talks to, and
+  where it is configured. The kind of overview the map is built for — without
+  it, answering means reading most of the project.
+tags: [architecture, overview]
+runs: 3
+execution:
+  max_turns: 20
+  timeout_seconds: 300
+  allowed_tools: [Read, Glob, Grep, Skill]
+  prompt: |
+    The project in the current directory is a small shop backend.
+    Question: list every external system or network service this application
+    talks to, which module talks to it, and which configuration values
+    (environment variables) control it. Answer as a short list; do not
+    modify any file.
+expected_outcome: >
+  Payment gateway over HTTP (shop/payments/gateway.py; SHOP_PAYMENT_GATEWAY_URL,
+  SHOP_PAYMENT_API_KEY), SMTP mail server (shop/notifications/mailer.py;
+  SHOP_SMTP_HOST), database (SHOP_DATABASE_URL). JWT secret is config, not an
+  external system.
+context:
+  scaffold_script: scaffold.sh
+graders:
+  - name: payment-gateway
+    type: llm
+    criteria: >
+      PASS if the answer lists the HTTP payment gateway, attributes it to the
+      payments gateway module (shop/payments/gateway.py) and names its
+      configuration (SHOP_PAYMENT_GATEWAY_URL and/or SHOP_PAYMENT_API_KEY).
+      FAIL otherwise.
+  - name: smtp
+    type: llm
+    criteria: >
+      PASS if the answer lists the SMTP mail server, attributes it to the
+      mailer module (shop/notifications/mailer.py) and names SHOP_SMTP_HOST.
+      FAIL otherwise.
+  - name: database
+    type: regex
+    pattern: "SHOP_DATABASE_URL|DATABASE_URL"
+  - name: used-focl-map
+    type: regex
+    target: trace
+    pattern: "mcp__plugin_focl_focl__focl_"
+    arm: with-only

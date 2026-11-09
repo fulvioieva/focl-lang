@@ -1,0 +1,41 @@
+schema_version: "1.1"
+name: cancel-rules
+description: >
+  Business rule plus side effects spread over three modules (order service,
+  payment gateway, mailer).
+tags: [business-rule, cross-module]
+runs: 3
+execution:
+  max_turns: 15
+  timeout_seconds: 300
+  allowed_tools: [Read, Glob, Grep, Skill]
+  prompt: |
+    The project in the current directory is a small shop backend.
+    Question: which order statuses can be cancelled, and what side effects
+    does cancelling an order that was already PAID have (external calls,
+    notifications)? Answer in a few sentences; do not modify any file.
+expected_outcome: >
+  Only NEW and PAID; otherwise ORDER_NOT_CANCELLABLE. Cancelling a PAID order
+  refunds it through the payment gateway (POST /charges/{id}/refunds), then
+  the order becomes CANCELLED and an order_cancelled email is sent.
+context:
+  scaffold_script: scaffold.sh
+graders:
+  - name: names-cancellable-statuses
+    type: llm
+    criteria: >
+      PASS if the answer states that exactly NEW and PAID orders can be
+      cancelled (and that other statuses such as SHIPPED or DELIVERED are
+      rejected, e.g. with ORDER_NOT_CANCELLABLE). FAIL if it lists any other
+      status as cancellable or omits NEW or PAID.
+  - name: names-side-effects
+    type: llm
+    criteria: >
+      PASS if the answer says that cancelling a PAID order issues a refund
+      through the payment gateway AND sends a cancellation email to the
+      customer. FAIL if either side effect is missing or wrong.
+  - name: used-focl-map
+    type: regex
+    target: trace
+    pattern: "mcp__plugin_focl_focl__focl_"
+    arm: with-only
