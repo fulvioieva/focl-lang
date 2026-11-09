@@ -10,7 +10,7 @@
       "name": "focl",
       "source": "./plugin",
       "description": "Read your codebase through a token-compressed FOCL map in Claude Code: MCP tools (focl_overview / focl_module), a SessionStart freshness hook, helper commands, and a skill.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "author": {
         "name": "Fulvio Ieva"
       }

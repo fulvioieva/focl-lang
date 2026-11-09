@@ -18,6 +18,23 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Planned
+- Externalise system prompts to `focl/prompts/` as loadable resources
+
+---
+
+## [0.5.0] — 2026-11-09
+
+Claude Code plugin `0.2.0` ships alongside (skill, hook, `focl-explorer`
+subagent, `/focl-sync` and `/focl-decompile` changes).
+
+### Upgrade notes
+- Maps generated before 0.5.0 have no per-module hashes: `focl check` falls
+  back to mtimes and `focl sync --changed` refuses. Run one full `focl sync`
+  to stamp them.
+- `focl claude-setup` now writes nothing but the `CLAUDE.md` pointer when the
+  `focl` plugin is enabled; pass `--standalone` for the old behaviour.
+
 ### Added
 - **Per-module freshness.** Generated maps stamp every `# src:` line with a
   short content hash of its source (`# src: a/B.java @h:1a2b3c4d5e6f`;
@@ -80,9 +97,6 @@ FOCL uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     the CLI is missing (verified in bash, cmd and PowerShell).
   - `focl mcp` starts even without a `.focl` (warning on stderr); its tools
     say there's no map yet and pick it up once `focl init` creates it.
-
-### Planned
-- Externalise system prompts to `focl/prompts/` as loadable resources
 
 ---
 

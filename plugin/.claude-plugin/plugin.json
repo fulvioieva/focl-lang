@@ -1,7 +1,7 @@
 {
   "name": "focl",
   "displayName": "FOCL — AI-native codebase compression",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Read your codebase through a token-compressed FOCL map: an MCP server, a freshness hook, helper commands, and a skill that tells Claude when to use the map.",
   "author": {
     "name": "Fulvio Ieva",
